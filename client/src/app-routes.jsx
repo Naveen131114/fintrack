@@ -4,27 +4,37 @@ import { MastersPage, SubscriptionsPage, TransactionsPage, UsersPage } from './p
 import { Sidebar } from './components/Sidebar';
 import { AnalyticsPage, BudgetsPage, LoginPage, PlansPage } from './publicPages';
 
-const isSuperAdmin = (import.meta.env.VITE_USER_ROLE || 'user') === 'super_admin';
+function getCurrentUser() {
+    try {
+        return JSON.parse(localStorage.getItem('fintrack_user') || 'null');
+    } catch {
+        return null;
+    }
+}
 
 function PageLayout({ children }) {
     return <div className="app-shell"><Sidebar /><main className="main-content">{children}</main></div>;
 }
 
 export default function AppRoutes() {
+    const currentUser = getCurrentUser();
+    const isAuthenticated = Boolean(localStorage.getItem('fintrack_access_token'));
+    const isSuperAdmin = currentUser?.role === 'super_admin';
+
     return <Routes>
-        <Route path="/" element={<App />} />
-        <Route path="/transactions" element={<PageLayout><TransactionsPage /></PageLayout>} />
-        <Route path="/masters" element={<PageLayout><MastersPage /></PageLayout>} />
-        <Route path="/analytics" element={<PageLayout><AnalyticsPage /></PageLayout>} />
-        <Route path="/budgets" element={<PageLayout><BudgetsPage /></PageLayout>} />
+        <Route path="/" element={isAuthenticated ? <App /> : <Navigate to="/login" replace />} />
+        <Route path="/transactions" element={isAuthenticated ? <PageLayout><TransactionsPage /></PageLayout> : <Navigate to="/login" replace />} />
+        <Route path="/masters" element={isAuthenticated ? <PageLayout><MastersPage /></PageLayout> : <Navigate to="/login" replace />} />
+        <Route path="/analytics" element={isAuthenticated ? <PageLayout><AnalyticsPage /></PageLayout> : <Navigate to="/login" replace />} />
+        <Route path="/budgets" element={isAuthenticated ? <PageLayout><BudgetsPage /></PageLayout> : <Navigate to="/login" replace />} />
         <Route path="/plans" element={<PlansPage />} />
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />} />
         {isSuperAdmin && (
             <>
                 <Route path="/users" element={<PageLayout><UsersPage /></PageLayout>} />
                 <Route path="/subscriptions" element={<PageLayout><SubscriptionsPage /></PageLayout>} />
             </>
         )}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to={isAuthenticated ? '/' : '/plans'} replace />} />
     </Routes>;
 }

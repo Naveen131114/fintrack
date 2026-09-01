@@ -10,15 +10,20 @@ import User from './models/User.js';
 import Subscription from './models/Subscription.js';
 import { requireSuperAdmin } from './middleware/requireSuperAdmin.js';
 import publicRoutes from './routes/publicRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import { authenticateToken } from './middleware/authMiddleware.js';
+import budgetRoutes from './routes/budgetRoutes.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
-app.use('/api/transactions', transactionRoutes);
-app.use('/api/masters', masterRoutes);
-app.use('/api/users', resourceRoutes(User, { superAdmin: true, middleware: requireSuperAdmin }));
-app.use('/api/subscriptions', resourceRoutes(Subscription, { superAdmin: true, middleware: requireSuperAdmin }));
+app.use('/api/auth', authRoutes);
+app.use('/api/transactions', authenticateToken, transactionRoutes);
+app.use('/api/masters', authenticateToken, masterRoutes);
+app.use('/api/budgets', authenticateToken, budgetRoutes);
+app.use('/api/users', authenticateToken, resourceRoutes(User, { superAdmin: true, middleware: requireSuperAdmin }));
+app.use('/api/subscriptions', authenticateToken, resourceRoutes(Subscription, { superAdmin: true, middleware: requireSuperAdmin }));
 app.use('/api/public', publicRoutes);
 app.use(errorHandler);
 

@@ -1047,3 +1047,121 @@ nav {
         justify-content: center;
     }
 }
+
+/* Required field asterisk */
+.required-asterisk {
+    color: #d8745c;
+    font-weight: 700;
+    margin-left: 3px;
+}
+
+/* Alert Dialog */
+.alert-dialog {
+    width: min(100%, 360px);
+    text-align: center;
+}
+
+.alert-dialog-header {
+    margin-bottom: 16px;
+}
+
+.alert-dialog-header h2 {
+    font: 600 16px 'DM Sans', sans-serif;
+    margin: 0;
+    color: #24313b;
+}
+
+.alert-dialog-content {
+    margin-bottom: 22px;
+}
+
+.alert-dialog-content p {
+    margin: 0;
+    font-size: 13px;
+    color: #66736f;
+    line-height: 1.5;
+}
+
+.alert-dialog-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.alert-dialog-actions button {
+    flex: 1;
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.secondary-button {
+    background: #f4f7f4;
+    color: #66736f;
+    border: 1px solid #dfe7e2;
+}
+
+.secondary-button:hover {
+    background: #eef3f0;
+    color: #24313b;
+}
+
+.danger-button {
+    background: #d8745c;
+    color: #fff;
+}
+
+.danger-button:hover {
+    background: #c45a42;
+}
+
+/* Date filter dropdown */
+.date-filter-group {
+    position: relative;
+}
+
+.date-filter-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px;
+    margin-top: 4px;
+    min-width: 140px;
+    box-shadow: 0 4px 12px rgba(30, 44, 40, .15);
+    z-index: 10;
+}
+
+.date-filter-group:hover .date-filter-dropdown {
+    display: grid;
+}
+
+.date-filter-dropdown button {
+    background: transparent;
+    color: #66736f;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    text-align: left;
+    width: 100%;
+}
+
+.date-filter-dropdown button:hover {
+    background: #f4f7f4;
+    color: var(--green);
+}
+
+/* Success banner */
+.success-banner {
+    padding: 12px;
+    margin: 0 0 15px;
+    color: #1b6942;
+    background: #e3f2eb;
+    border-radius: 6px;
+    font-size: 12px;
+    border-left: 3px solid var(--green);
+}
