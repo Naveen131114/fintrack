@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from './services/api';
 import DataTable from './components/DataTable';
@@ -110,6 +110,50 @@ export function TransactionsPage() {
     const [form, setForm] = useState({ type: '', category: '', date: '', amount: '', description: '' });
     const [message, setMessage] = useState('');
     const [deleteAlert, setDeleteAlert] = useState(null);
+    const [dateFilter, setDateFilter] = useState('this-month');
+    const [typeFilter, setTypeFilter] = useState('All');
+
+    const dateOptions = [
+        ['today', 'Today'],
+        ['this-week', 'This week'],
+        ['this-month', 'This month'],
+        ['last-month', 'Last month'],
+        ['last-3-months', 'Last 3 months'],
+        ['all', 'All dates']
+    ];
+
+    const getDateRange = (filter) => {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = today.getMonth();
+        if (filter === 'today') return [new Date(year, month, today.getDate()), new Date(year, month, today.getDate() + 1)];
+        if (filter === 'this-week') { const start = new Date(year, month, today.getDate() - today.getDay()); const end = new Date(start); end.setDate(end.getDate() + 7); return [start, end]; }
+        if (filter === 'this-month') return [new Date(year, month, 1), new Date(year, month + 1, 1)];
+        if (filter === 'last-month') return [new Date(year, month - 1, 1), new Date(year, month, 1)];
+        if (filter === 'last-3-months') return [new Date(year, month - 3, 1), new Date(year, month + 1, 1)];
+        return [null, null];
+    };
+
+    const filteredRows = useMemo(() => {
+        const [start, end] = getDateRange(dateFilter);
+        return rows.filter((row) => {
+            const date = new Date(row.date);
+            return (typeFilter === 'All' || row.type === typeFilter) && (!start || (date >= start && date < end));
+        });
+    }, [rows, dateFilter, typeFilter]);
+
+    const exportRows = (format) => {
+        const text = filteredRows.map((row) => `${row.type} | ${row.category} | ${new Date(row.date).toLocaleDateString()} | ₹${row.amount} | ${row.description || row.title || ''}`).join('\n') || 'No transactions found';
+        const blob = format === 'xl'
+            ? new Blob([['Type', 'Category', 'Date', 'Amount', 'Description'].join(',') + '\n' + filteredRows.map((row) => [row.type, row.category, new Date(row.date).toLocaleDateString(), row.amount, row.description || row.title || ''].map((value) => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n')], { type: 'text/csv' })
+            : new Blob([format === 'word' ? `<html><body><pre>${text}</pre></body></html>` : text], { type: format === 'word' ? 'application/msword' : 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `transactions.${format === 'xl' ? 'csv' : format === 'word' ? 'doc' : 'pdf'}`;
+        link.click();
+        URL.revokeObjectURL(url);
+    };
 
     const load = () => api.transactions.list().then(setRows);
     useEffect(() => { load(); api.types.list().then(setTypes); }, []);
@@ -149,7 +193,7 @@ export function TransactionsPage() {
 
     const columns = [{ key: 'type', label: 'Type' }, { key: 'category', label: 'Category' }, { key: 'date', label: 'Date & time', render: (row) => new Date(row.date).toLocaleString() }, { key: 'amount', label: 'Amount', render: (row) => `₹${Number(row.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` }, { key: 'description', label: 'Description' }];
 
-    return <div className="resource-page"><div className="resource-heading"><div><p className="eyebrow">Ledger</p><h1>Transactions</h1><p className="subheading">Every income and expense, in descending order.</p></div><button className="primary-button" onClick={() => setOpen(true)}><Plus size={18} />Add transaction</button></div>{message && <div className="success-banner">{message}</div>}<section className="panel resource-panel"><DataTable columns={columns} rows={rows} onEdit={(row) => { setEditing(row); setForm({ ...row, date: new Date(row.date).toISOString().slice(0, 16) }); setOpen(true); }} onDelete={(row) => setDeleteAlert(row)} /></section>{open && <div className="modal-backdrop"><div className="modal"><div className="modal-heading"><div><p className="eyebrow">Ledger entry</p><h2>{editing ? 'Edit transaction' : 'Add transaction'}</h2></div><button className="icon-button" onClick={() => setOpen(false)}>×</button></div><form onSubmit={save}><label>Type <span className="required-asterisk">*</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value, category: '' })} required><option value="">Select type</option>{(types.length ? types.map((item) => item.name) : ['Income', 'Expense', 'Others']).map((item) => <option key={item}>{item}</option>)}</select></label><label>Category <span className="required-asterisk">*</span><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} required><option value="">Select category</option>{categories.map((item) => <option key={item._id}>{item.name}</option>)}</select></label><label>Date and time <span className="required-asterisk">*</span><input type="datetime-local" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} required /></label><label>Amount <span className="required-asterisk">*</span><input type="number" min="0" step="0.01" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} required /></label><label>Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Optional" /></label><button className="primary-button modal-submit">Save transaction</button></form></div></div>}{deleteAlert && <AlertDialog open={true} title="Delete transaction?" message="This action cannot be undone." confirmText="Delete" cancelText="Cancel" variant="destructive" onConfirm={() => remove(deleteAlert)} onCancel={() => setDeleteAlert(null)} />}</div>;
+    return <div className="resource-page"><div className="resource-heading"><div><p className="eyebrow">Ledger</p><h1>Transactions</h1><p className="subheading">Every income and expense, in descending order.</p></div><button className="primary-button" onClick={() => setOpen(true)}><Plus size={18} />Add transaction</button></div>{message && <div className="success-banner">{message}</div>}<section className="panel resource-panel"><DataTable columns={columns} rows={rows} onEdit={(row) => { setEditing(row); setForm({ ...row, date: new Date(row.date).toISOString().slice(0, 16) }); setOpen(true); }} onDelete={(row) => setDeleteAlert(row)} /></section>{open && <div className="modal-backdrop"><div className="modal"><div className="modal-heading"><div><p className="eyebrow">Ledger entry</p><h2>{editing ? 'Edit transaction' : 'Add transaction'}</h2></div><button className="icon-button" onClick={() => setOpen(false)}>×</button></div><form onSubmit={save}><label>Type <span className="required-asterisk">*</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value, category: '' })} required><option value="">Select type</option>{(types.length ? types.map((item) => item.name) : ['Income', 'Expense', 'Others']).map((item) => <option key={item}>{item}</option>)}</select></label><label>Category <span className="required-asterisk">*</span><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} required><option value="">Select category</option>{categories.map((item) => <option key={item._id}>{item.name}</option>)}</select></label><label>Date and time <span className="required-asterisk">*</span><input type="datetime-local" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} required /></label><label className='display-inline'>Amount <span className="required-asterisk">*</span><input type="number" min="0" step="0.01" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} required /></label><label>Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Optional" /></label><button className="primary-button modal-submit">Save transaction</button></form></div></div>}{deleteAlert && <AlertDialog open={true} title="Delete transaction?" message="This action cannot be undone." confirmText="Delete" cancelText="Cancel" variant="destructive" onConfirm={() => remove(deleteAlert)} onCancel={() => setDeleteAlert(null)} />}</div>;
 }
 
 export function MastersPage() { const [tab, setTab] = useState('types'); const [rows, setRows] = useState([]); const [types, setTypes] = useState([]); const [name, setName] = useState(''); const [type, setType] = useState(''); const [editing, setEditing] = useState(null); const load = () => (tab === 'types' ? api.types.list() : api.categories.list()).then(setRows); useEffect(() => { api.types.list().then(setTypes); }, []); useEffect(() => { load(); }, [tab]); const add = async (event) => { event.preventDefault(); const data = { name, ...(tab === 'categories' ? { type } : {}) }; if (editing) await (tab === 'types' ? api.types.update(editing._id, data) : api.categories.update(editing._id, data)); else await (tab === 'types' ? api.types.create(data) : api.categories.create(data)); setName(''); setType(''); setEditing(null); load(); }; const remove = async (row) => { if (window.confirm('Delete this master record?')) { await (tab === 'types' ? api.types.remove(row._id) : api.categories.remove(row._id)); load(); } }; return <div className="resource-page"><div className="resource-heading"><div><p className="eyebrow">Configuration</p><h1>Masters</h1><p className="subheading">Define transaction types and type-specific categories.</p></div></div><div className="master-tabs"><button className={tab === 'types' ? 'selected' : ''} onClick={() => { setTab('types'); setEditing(null); }}>Types</button><button className={tab === 'categories' ? 'selected' : ''} onClick={() => { setTab('categories'); setEditing(null); }}>Categories</button></div><section className="panel resource-panel"><form className="inline-form" onSubmit={add}><input placeholder={tab === 'types' ? 'New type name' : 'New category name'} value={name} onChange={(event) => setName(event.target.value)} required />{tab === 'categories' && <select value={type} onChange={(event) => setType(event.target.value)} required><option value="">Select type</option>{types.map((item) => <option key={item._id}>{item.name}</option>)}</select>}<button className="primary-button"><Plus size={16} />{editing ? 'Update' : 'Add'}</button></form><DataTable columns={tab === 'types' ? [{ key: 'name', label: 'Type name' }] : [{ key: 'name', label: 'Category name' }, { key: 'type', label: 'Transaction type' }]} rows={rows} onEdit={(row) => { setEditing(row); setName(row.name); setType(row.type || ''); }} onDelete={remove} /></section></div>; }

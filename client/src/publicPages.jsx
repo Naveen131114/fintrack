@@ -41,10 +41,12 @@ export function BudgetsPage() {
     const [saved, setSaved] = useState(null);
     const [message, setMessage] = useState('');
     const [loading, setLoading] = useState(false);
+    const [transactions, setTransactions] = useState([]);
 
     const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
 
     useEffect(() => {
+        api.transactions.list().then(setTransactions).catch(() => { });
         const loadBudget = async () => {
             try {
                 const result = await api.budgets.getByMonth(currentMonth);
@@ -57,6 +59,9 @@ export function BudgetsPage() {
         };
         loadBudget();
     }, []);
+
+    const monthExpenses = transactions.filter((transaction) => transaction.type === 'Expense' && transaction.date?.startsWith(currentMonth)).reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+    const budgetDifference = Number(budget || 0) - monthExpenses;
 
     const handleSubmit = async (event) => {
         event.preventDefault();
@@ -82,7 +87,61 @@ export function BudgetsPage() {
         }
     };
 
-    return <div className="resource-page"><p className="eyebrow">Planning</p><h1>Budgets</h1><p className="subheading">Set a monthly spending target and keep it visible.</p>{message && <div className="success-banner">{message}</div>}<section className="panel budget-panel"><h2>Monthly expense budget</h2><form className="inline-form" onSubmit={handleSubmit}><input type="number" min="0" step="0.01" value={budget} onChange={(event) => setBudget(event.target.value)} placeholder="Enter budget amount" required /><button className="primary-button" disabled={loading}>{loading ? 'Saving...' : 'Save budget'}</button></form>{saved !== null && <p className="budget-result">Your monthly budget is {money(saved.amount)}.</p>}</section></div>;
+    return <div className="resource-page"><p className="eyebrow">Planning</p><h1>Budgets</h1><p className="subheading">Set a monthly spending target and keep it visible.</p>{message && <div className="success-banner">{message}</div>}<section className="panel budget-panel"><h2>Monthly expense budget</h2><form className="inline-form" onSubmit={handleSubmit}><input type="number" min="0" step="0.01" value={budget} onChange={(event) => setBudget(event.target.value)} placeholder="Enter budget amount" required /><button className="primary-button" disabled={loading}>{loading ? 'Saving...' : 'Save budget'}</button></form>{saved !== null && <><p className="budget-result">Your monthly budget is {money(saved.amount)}.</p><div className={`achievement-card ${budgetDifference >= 0 ? 'positive' : 'negative'}`}>{budgetDifference >= 0 ? `Under budget by ${money(budgetDifference)}` : `Over budget by ${money(Math.abs(budgetDifference))}`}</div></>}</section></div>;
+}
+
+export function TargetPage() {
+    const [target, setTarget] = useState('');
+    const [saved, setSaved] = useState(null);
+    const [message, setMessage] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [transactions, setTransactions] = useState([]);
+
+    const currentMonth = new Date().toISOString().slice(0, 7);
+
+    useEffect(() => {
+        api.transactions.list().then(setTransactions).catch(() => { });
+        const loadTarget = async () => {
+            try {
+                const result = await api.targets.getByMonth(currentMonth);
+                setSaved(result);
+                setTarget(result.amount);
+            } catch (error) {
+                setSaved(null);
+                setTarget('');
+            }
+        };
+        loadTarget();
+    }, []);
+
+    const monthIncome = transactions.filter((transaction) => transaction.type === 'Income' && transaction.date?.startsWith(currentMonth)).reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+    const targetDifference = monthIncome - Number(target || 0);
+
+    const handleSubmit = async (event) => {
+        event.preventDefault();
+        if (!target) return;
+
+        try {
+            setLoading(true);
+            const amount = Number(target);
+            if (saved?._id) {
+                await api.targets.update(saved._id, { amount, month: currentMonth });
+                setSaved({ ...saved, amount });
+                setMessage('Monthly income target updated successfully');
+            } else {
+                const result = await api.targets.create({ amount, month: currentMonth });
+                setSaved(result);
+                setMessage('Monthly income target saved successfully');
+            }
+            setTimeout(() => setMessage(''), 3000);
+        } catch (error) {
+            setMessage(error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return <div className="resource-page"><p className="eyebrow">Planning</p><h1>Target</h1><p className="subheading">Set a monthly income target to guide your savings and growth.</p>{message && <div className="success-banner">{message}</div>}<section className="panel budget-panel"><h2>Monthly income target</h2><form className="inline-form" onSubmit={handleSubmit}><input type="number" min="0" step="0.01" value={target} onChange={(event) => setTarget(event.target.value)} placeholder="Enter target amount" required /><button className="primary-button" disabled={loading}>{loading ? 'Saving...' : 'Save target'}</button></form>{saved !== null && <><p className="budget-result">Your monthly income target is {money(saved.amount)}.</p><div className={`achievement-card ${targetDifference >= 0 ? 'positive' : 'negative'}`}>{targetDifference >= 0 ? `Achieved target + ${money(targetDifference)}` : `Remaining ${money(Math.abs(targetDifference))} to reach target`}</div></>}</section></div>;
 }
 
 export function PlansPage() {
