@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: fintrack-frontend
+    runtime: static
+    buildCommand: npm install --prefix client && npm run build --prefix client
+    staticPublishPath: ./client/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
