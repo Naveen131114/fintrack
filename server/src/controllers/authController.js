@@ -31,6 +31,10 @@ function serializeUser(user) {
         emailId: user.emailId,
         phoneNumber: user.phoneNumber,
         role: user.role,
+        businessOwnerId: user.businessOwnerId,
+        permissionLevel: user.permissionLevel,
+        allowedBranches: user.allowedBranches || [],
+        status: user.status,
         subscriptionPlan: user.subscriptionPlan,
         approvalStatus: user.approvalStatus,
         subscriptionStartDate: user.subscriptionStartDate,
@@ -64,6 +68,10 @@ export async function login(req, res, next) {
             return res.status(401).json({ message: 'Invalid username or password' });
         }
 
+        if (user.status === 'inactive') {
+            return res.status(403).json({ message: 'This account is inactive' });
+        }
+
         const isPasswordValid = await passwordMatches(user.password, password);
 
         if (!isPasswordValid) {
@@ -86,6 +94,18 @@ export async function login(req, res, next) {
 
         if (!isOwner && user.approvalStatus !== 'approved') {
             return res.status(403).json({ message: 'Your account is pending admin approval' });
+        }
+
+        if (!isOwner && user.role === 'business_staff') {
+            if (user.subscriptionStartDate && new Date(user.subscriptionStartDate) > new Date()) {
+                return res.status(403).json({ message: 'Staff subscription has not started yet' });
+            }
+            if (user.subscriptionEndDate && new Date(user.subscriptionEndDate) < new Date()) {
+                return res.status(403).json({ message: 'Staff subscription has expired' });
+            }
+            if (user.status !== 'active' || !(user.allowedBranches || []).length) {
+                return res.status(403).json({ message: 'Business account access required' });
+            }
         }
 
         const endDate = user.subscriptionEndDate ? new Date(user.subscriptionEndDate) : null;

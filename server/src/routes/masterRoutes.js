@@ -1,30 +1,33 @@
 import { Router } from 'express';
 import CategoryMaster from '../models/CategoryMaster.js';
 import TypeMaster from '../models/TypeMaster.js';
+import { dataOwnerIdFor, requireDataWrite } from '../middleware/businessAccess.js';
 
 const router = Router();
 
+// Reads are scoped to the business owner's data set so business_staff can see
+// the masters created by their Business Owner. Personal users see their own.
 router.get('/types', async (req, res, next) => {
     try {
-        const types = await TypeMaster.find({ userId: req.user.id }).sort({ createdAt: -1 });
+        const types = await TypeMaster.find({ userId: dataOwnerIdFor(req.user) }).sort({ createdAt: -1 });
         res.json(types);
     } catch (error) {
         next(error);
     }
 });
 
-router.post('/types', async (req, res, next) => {
+router.post('/types', requireDataWrite, async (req, res, next) => {
     try {
-        const type = await TypeMaster.create({ ...req.body, userId: req.user.id });
+        const type = await TypeMaster.create({ ...req.body, userId: dataOwnerIdFor(req.user) });
         res.status(201).json(type);
     } catch (error) {
         next(error);
     }
 });
 
-router.put('/types/:id', async (req, res, next) => {
+router.put('/types/:id', requireDataWrite, async (req, res, next) => {
     try {
-        const type = await TypeMaster.findOneAndUpdate({ _id: req.params.id, userId: req.user.id }, req.body, { new: true, runValidators: true });
+        const type = await TypeMaster.findOneAndUpdate({ _id: req.params.id, userId: dataOwnerIdFor(req.user) }, req.body, { new: true, runValidators: true });
         if (!type) return res.status(404).json({ message: 'Type not found' });
         res.json(type);
     } catch (error) {
@@ -32,9 +35,9 @@ router.put('/types/:id', async (req, res, next) => {
     }
 });
 
-router.delete('/types/:id', async (req, res, next) => {
+router.delete('/types/:id', requireDataWrite, async (req, res, next) => {
     try {
-        const type = await TypeMaster.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
+        const type = await TypeMaster.findOneAndDelete({ _id: req.params.id, userId: dataOwnerIdFor(req.user) });
         if (!type) return res.status(404).json({ message: 'Type not found' });
         res.status(204).end();
     } catch (error) {
@@ -44,7 +47,7 @@ router.delete('/types/:id', async (req, res, next) => {
 
 router.get('/categories', async (req, res, next) => {
     try {
-        const filter = { userId: req.user.id };
+        const filter = { userId: dataOwnerIdFor(req.user) };
         if (req.query.type) filter.type = req.query.type;
         const categories = await CategoryMaster.find(filter).sort({ createdAt: -1 });
         res.json(categories);
@@ -53,18 +56,18 @@ router.get('/categories', async (req, res, next) => {
     }
 });
 
-router.post('/categories', async (req, res, next) => {
+router.post('/categories', requireDataWrite, async (req, res, next) => {
     try {
-        const category = await CategoryMaster.create({ ...req.body, userId: req.user.id });
+        const category = await CategoryMaster.create({ ...req.body, userId: dataOwnerIdFor(req.user) });
         res.status(201).json(category);
     } catch (error) {
         next(error);
     }
 });
 
-router.put('/categories/:id', async (req, res, next) => {
+router.put('/categories/:id', requireDataWrite, async (req, res, next) => {
     try {
-        const category = await CategoryMaster.findOneAndUpdate({ _id: req.params.id, userId: req.user.id }, req.body, { new: true, runValidators: true });
+        const category = await CategoryMaster.findOneAndUpdate({ _id: req.params.id, userId: dataOwnerIdFor(req.user) }, req.body, { new: true, runValidators: true });
         if (!category) return res.status(404).json({ message: 'Category not found' });
         res.json(category);
     } catch (error) {
@@ -72,9 +75,9 @@ router.put('/categories/:id', async (req, res, next) => {
     }
 });
 
-router.delete('/categories/:id', async (req, res, next) => {
+router.delete('/categories/:id', requireDataWrite, async (req, res, next) => {
     try {
-        const category = await CategoryMaster.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
+        const category = await CategoryMaster.findOneAndDelete({ _id: req.params.id, userId: dataOwnerIdFor(req.user) });
         if (!category) return res.status(404).json({ message: 'Category not found' });
         res.status(204).end();
     } catch (error) {

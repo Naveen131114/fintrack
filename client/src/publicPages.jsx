@@ -147,7 +147,7 @@ export function TargetPage() {
 export function PlansPage() {
     const [plans, setPlans] = useState([]);
     const [selected, setSelected] = useState(null);
-    const [form, setForm] = useState({});
+    const [form, setForm] = useState({ accountType: 'personal' });
     const [message, setMessage] = useState('');
 
     useEffect(() => { api.public.plans().then(setPlans).catch(() => { }); }, []);
@@ -158,11 +158,28 @@ export function PlansPage() {
         try {
             await api.public.requestSubscription({ ...form, planId: selected._id });
             setSelected(null);
+            setForm({ accountType: 'personal' });
             setMessage('Your request has been submitted successfully. The payment request has been sent to the super admin for approval. Once validated, your subscription access will be activated.');
         } catch (error) {
             setMessage(error.message);
         }
     };
 
-    return <div className="plans-page"><div className="plans-intro"><p className="eyebrow">Fintrack personal finance</p><h1>Choose a plan for calmer money management.</h1><p>Track income, expenses, budgets, and the details that make your monthly decisions easier.</p><a href="/login" className="primary-button">Sign in to your account</a></div>{message && <div className="success-banner">{message}</div>}<div className="plans-grid">{plans.map((plan) => <button className={`plan-card ${selected?._id === plan._id ? 'selected' : ''}`} key={plan._id} onClick={() => setSelected(plan)}><span>{plan.planName}</span><strong>₹{Number(plan.amount).toLocaleString('en-IN')}</strong><small>{plan.period}</small></button>)}</div><div className="payment-instructions"><h2>Payment and approval</h2><p>Pay using the UPI QR code below or the mobile number shown here. After payment, we will verify the payment request and activate your subscription.</p><div className="upi-box"><img src={upiQrUrl} alt="UPI payment QR code" /><div><p><strong>UPI Mobile Number:</strong> {upiMobileNumber}</p><p><strong>UPI ID:</strong> m.naveenkumarmunees@upi</p></div></div></div>{selected && <div className="modal-backdrop"><div className="modal"><div className="modal-heading"><div><p className="eyebrow">{selected.planName} · {selected.period}</p><h2>Your details</h2></div><button className="icon-button" onClick={() => setSelected(null)}>×</button></div><form onSubmit={submit}>{[['name', 'Name'], ['phoneNumber', 'Phone number'], ['emailId', 'Email'], ['userName', 'Username'], ['password', 'Password']].map(([key, label]) => <label key={key}>{label}<input type={key === 'password' ? 'password' : key === 'emailId' ? 'email' : 'text'} value={form[key] || ''} onChange={update(key)} required /></label>)}<label>UPI transaction reference<input value={form.paymentReference || ''} onChange={update('paymentReference')} placeholder="Add after payment" /></label><button className="primary-button modal-submit">Submit payment request</button></form></div></div>}</div>;
+    const personalPlans = plans.filter((p) => p.planType !== 'business');
+    const businessPlans = plans.filter((p) => p.planType === 'business');
+
+    return <div className="plans-page"><div className="plans-intro"><p className="eyebrow">Fintrack personal finance</p><h1>Choose a plan for calmer money management.</h1><p>Track income, expenses, budgets, and the details that make your monthly decisions easier.</p><a href="/login" className="primary-button">Sign in to your account</a></div>{message && <div className="success-banner">{message}</div>}
+        <div className="plans-grid">
+            <h2 className="plan-section-title">Personal Plans</h2>{personalPlans.length === 0 ? <p className="subheading">No personal plans available.</p> :
+                <div className="plan-list personal-plans">{personalPlans.map((plan) =>
+                    <button className={`plan-card ${selected?._id === plan._id ? 'selected' : ''}`} key={plan._id} onClick={() => { setSelected(plan); setForm((f) => ({ ...f, accountType: 'personal' })); }} data-plan-type={plan.planType || 'personal'}><span>{plan.planName}</span>
+                        <strong>₹{Number(plan.amount).toLocaleString('en-IN')}</strong><small>{plan.period}</small></button>)}</div>}</div>
+        <div className="plans-grid">
+            <h2 className="plan-section-title">Business Plans</h2>{businessPlans.length === 0 ? <p className="subheading">No business plans available.</p> :
+                <div className="plan-list business-plans">{businessPlans.map((plan) =>
+                    <button className={`plan-card business ${selected?._id === plan._id ? 'selected' : ''}`} key={plan._id} onClick={() => { setSelected(plan); setForm((f) => ({ ...f, accountType: 'business' })); }} data-plan-type={plan.planType}><span>{plan.planName}</span>
+                        <strong>₹{Number(plan.amount).toLocaleString('en-IN')}</strong><small>{plan.period}</small>{plan.maxBranches !== undefined && plan.maxBranches !== null && <span className="plan-badge">Branches Limit: {plan.maxBranches}</span>}{plan.maxStaff !== undefined && plan.maxStaff !== null && <span className="plan-badge">Staff Limit: {plan.maxStaff}</span>}</button>)}</div>}</div>
+        <div className="payment-instructions"><h2>Payment and approval</h2>
+            <p>Pay using the UPI QR code below or the mobile number shown here. After payment, we will verify the payment request and activate your subscription.</p>
+            <div className="upi-box"><img src={upiQrUrl} alt="UPI payment QR code" /><div><p><strong>UPI Mobile Number:</strong> {upiMobileNumber}</p><p><strong>UPI ID:</strong> m.naveenkumarmunees@upi</p></div></div></div>{selected && <div className="modal-backdrop"><div className="modal"><div className="modal-heading"><div><p className="eyebrow">{selected.planName} · {selected.period}</p><h2>Your details</h2></div><button className="icon-button" onClick={() => setSelected(null)}>×</button></div><form onSubmit={submit}>{[['name', 'Name'], ['phoneNumber', 'Phone number'], ['emailId', 'Email'], ['userName', 'Username'], ['password', 'Password']].map(([key, label]) => <label key={key}>{label}<input type={key === 'password' ? 'password' : key === 'emailId' ? 'email' : 'text'} value={form[key] || ''} onChange={update(key)} required /></label>)}<label>Account type<select value={form.accountType || 'personal'} onChange={update('accountType')} required><option value="personal">Personal account</option><option value="business">Business account</option></select></label><label>UPI transaction reference<input value={form.paymentReference || ''} onChange={update('paymentReference')} placeholder="Add after payment" /></label><button className="primary-button modal-submit">Submit payment request</button></form></div></div>}</div>;
 }

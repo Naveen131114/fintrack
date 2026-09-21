@@ -14,6 +14,7 @@ import authRoutes from './routes/authRoutes.js';
 import { authenticateToken } from './middleware/authMiddleware.js';
 import budgetRoutes from './routes/budgetRoutes.js';
 import targetRoutes from './routes/targetRoutes.js';
+import businessRoutes from './routes/businessRoutes.js';
 
 const app = express();
 app.use(cors());
@@ -24,7 +25,8 @@ app.use('/api/transactions', authenticateToken, transactionRoutes);
 app.use('/api/masters', authenticateToken, masterRoutes);
 app.use('/api/budgets', authenticateToken, budgetRoutes);
 app.use('/api/targets', authenticateToken, targetRoutes);
-app.use('/api/users', authenticateToken, resourceRoutes(User, { superAdmin: true, middleware: requireSuperAdmin }));
+app.use('/api/business', authenticateToken, businessRoutes);
+app.use('/api/users', authenticateToken, resourceRoutes(User, { superAdmin: true, middleware: requireSuperAdmin, isUserModel: true }));
 app.use('/api/subscriptions', authenticateToken, resourceRoutes(Subscription, { superAdmin: true, middleware: requireSuperAdmin }));
 app.use('/api/public', publicRoutes);
 app.use(errorHandler);

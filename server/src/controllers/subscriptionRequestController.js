@@ -7,7 +7,7 @@ import { isSuperAdminIdentity } from '../config/superAdmin.js';
 export async function approveSubscriptionRequest(req, res, next) {
     try {
         const { id } = req.params;
-        const { approved, subscriptionStartDate, subscriptionEndDate } = req.body;
+        const { approved, subscriptionStartDate, subscriptionEndDate, role } = req.body;
         const user = await User.findById(id);
 
         if (!user) {
@@ -42,6 +42,13 @@ export async function approveSubscriptionRequest(req, res, next) {
         if (!user.subscriptionPlan) {
             user.subscriptionPlan = 'Manual approval';
         }
+        // Allow super admin to correct personal/business classification at approval time.
+        // Never overwrite an existing business_owner/business_staff account back to personal.
+        if (['user', 'business_owner'].includes(role) && !isSuperAdminIdentity(user.emailId, user.phoneNumber)) {
+            if (!(user.role === 'business_owner' && role === 'user') && !(user.role === 'business_staff')) {
+                user.role = role;
+            }
+        }
         await user.save();
 
         // Send approval email to user
@@ -67,7 +74,7 @@ export async function approveSubscriptionRequest(req, res, next) {
 
 export async function createSubscriptionRequest(req, res, next) {
     try {
-        const { planId, name, phoneNumber, emailId, userName, password, paymentReference, paymentScreenshotUrl } = req.body;
+        const { planId, name, phoneNumber, emailId, userName, password, paymentReference, paymentScreenshotUrl, accountType, role } = req.body;
 
         if (!planId || !name || !phoneNumber || !emailId || !userName || !password) {
             return res.status(400).json({ message: 'Plan, name, phone, email, username and password are required' });
@@ -97,14 +104,20 @@ export async function createSubscriptionRequest(req, res, next) {
         end.setMonth(end.getMonth() + months);
 
         const hashedPassword = await bcrypt.hash(password, 10);
+        const requestedRole = String(role || accountType || '').trim().toLowerCase();
+        // Business plans carry branch/staff limits while personal plans have none.
+        // Infer business_owner when explicitly requested or when the chosen plan includes business capacity.
+        const wantsBusiness = ['business', 'business_owner'].includes(requestedRole)
+            || plan.planType === 'business'
+            || (plan.maxBranches || 0) > 0
+            || (plan.maxStaff || 0) > 0;
         const user = await User.create({
             name,
             phoneNumber,
             emailId: normalizedEmail,
             userName: normalizedUserName,
             password: hashedPassword,
-            role: isSuperAdminIdentity(normalizedEmail, phoneNumber) ? 'super_admin' : 'user',
-            subscriptionPlan: plan.planName,
+            role: wantsBusiness ? 'business_owner' : 'user', subscriptionPlan: plan.planName,
             subscriptionStartDate: start,
             subscriptionEndDate: end,
             paymentReference,
