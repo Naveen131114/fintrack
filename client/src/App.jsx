@@ -7,6 +7,7 @@ import TransactionList from './components/TransactionList';
 import ExpenseChart from './components/ExpenseChart';
 import AddTransactionModal from './components/AddTransactionModal';
 import { api } from './services/api';
+import { getStoredUser, isBusinessStaff, isBusinessUser } from './utils/roles';
 
 const money = (value) => `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -55,13 +56,22 @@ export default function App() {
     const [showAllTransactions, setShowAllTransactions] = useState(false);
     const [theme, setTheme] = useState(() => localStorage.getItem('fintrack_theme') || 'light');
     const [filterOpen, setFilterOpen] = useState(false);
+    const [branches, setBranches] = useState([]);
+    const [selectedBranchId, setSelectedBranchId] = useState(() => localStorage.getItem('fintrack_selected_branch') || 'ALL');
+
+    useEffect(() => {
+        const user = getStoredUser();
+        if (isBusinessUser(user)) {
+            api.business.branches.list().then((items) => { const all = Array.isArray(items) ? items : []; const scoped = isBusinessStaff(user) ? all.filter((b) => (user.allowedBranches || []).some((id) => String(id) === String(b._id))) : all; setBranches(scoped.filter((b) => b.status === 'active')); }).catch(() => { });
+        }
+    }, []);
 
     useEffect(() => {
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('fintrack_theme', theme);
     }, [theme]);
 
-    useEffect(() => { api.transactions.list().then(setTransactions).catch(() => { }); }, []);
+    useEffect(() => { api.transactions.list(selectedBranchId).then(setTransactions).catch(() => { }); }, [selectedBranchId]);
 
     useEffect(() => {
         setShowAllTransactions(false);
@@ -82,6 +92,8 @@ export default function App() {
     const balance = income - expenses;
     const visibleTransactions = showAllTransactions ? filtered : filtered.slice(0, 5);
 
+    const selectBranch = (id) => { setSelectedBranchId(id); localStorage.setItem('fintrack_selected_branch', id); };
+
     const addTransaction = async (transaction) => {
         await api.transactions.create(transaction);
         setIsModalOpen(false);
@@ -98,5 +110,5 @@ export default function App() {
         }
     };
 
-    return <div className="app-shell">{mobileMenuOpen && <div className="mobile-backdrop" onClick={() => setMobileMenuOpen(false)} />}<Sidebar mobileMenuOpen={mobileMenuOpen} onCloseMobileMenu={() => setMobileMenuOpen(false)} /><main className="main-content"><header className="topbar"><button className="mobile-menu icon-button" aria-label="Open menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronDown size={14} /><strong>Overview</strong></div><div className="topbar-actions"><div className={`search-wrap ${searchOpen ? 'open' : ''}`}><Search size={16} /><input type="text" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search transactions" aria-label="Search transactions" /></div><button className="icon-button search-button" aria-label="Search transactions" onClick={() => setSearchOpen((value) => !value)}><Search size={19} /></button><div className="profile-menu-wrap"><button className="topbar-avatar" title="User Profile" type="button" onClick={() => setProfileMenuOpen((value) => !value)}>FT</button>{profileMenuOpen && <div className="profile-menu"><button type="button" className="profile-menu-item" onClick={() => { setTheme((value) => value === 'light' ? 'dark' : 'light'); setProfileMenuOpen(false); }}><Settings size={15} />Settings</button><button type="button" className="profile-menu-item danger" onClick={handleLogout}><LogOut size={15} />Logout</button></div>}</div></div></header><div className="page-content"><div className="page-heading"><div><p className="eyebrow">{new Date().toLocaleDateString('en-IN', { dateStyle: 'full' })}</p><h1>Your financial snapshot <span>✦</span></h1><p className="subheading">Track your income and expenses for this month.</p></div><button className="primary-button" onClick={() => setIsModalOpen(true)}><Plus size={18} />Add transaction</button></div><div className="toolbar"><div className="overview-date-filter-group"><button className="date-filter" type="button" onClick={() => setFilterOpen((value) => !value)}><CalendarDays size={17} />{DATE_OPTIONS.find((option) => option.value === dateFilter)?.label || 'This month'}<ChevronDown size={15} /></button>{filterOpen && <div className="overview-date-filter-dropdown">{DATE_OPTIONS.map((option) => <button key={option.value} type="button" className={dateFilter === option.value ? 'selected' : ''} onClick={() => { setDateFilter(option.value); setFilterOpen(false); }}>{option.label}</button>)}</div>}</div><span className="updated">Synced with your account</span></div><section className="summary-grid"><SummaryCard type="balance" label="Total balance" value={money(balance)} change="Live" tone="balance" /><SummaryCard type="income" label="Total income" value={money(income)} change="Live" tone="income" /><SummaryCard type="expense" label="Total expenses" value={money(expenses)} change="Live" tone="expense" /></section><div className="dashboard-grid"><TransactionList transactions={visibleTransactions} onSeeAll={() => setShowAllTransactions((value) => !value)} showAll={showAllTransactions} /><ExpenseChart transactions={filtered} /></div></div></main>{isModalOpen && <AddTransactionModal onClose={() => setIsModalOpen(false)} onAdd={addTransaction} />}</div>;
+    return <div className="app-shell">{mobileMenuOpen && <div className="mobile-backdrop" onClick={() => setMobileMenuOpen(false)} />}<Sidebar mobileMenuOpen={mobileMenuOpen} onCloseMobileMenu={() => setMobileMenuOpen(false)} /><main className="main-content"><header className="topbar"><button className="mobile-menu icon-button" aria-label="Open menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronDown size={14} /><strong>Overview</strong></div>{isBusinessUser(getStoredUser()) && <select aria-label="Branch selector" value={selectedBranchId} onChange={(event) => selectBranch(event.target.value)}><option value="ALL">All branches</option>{branches.map((branch) => <option value={branch._id} key={branch._id}>{branch.branchName}</option>)}</select>}<div className="topbar-actions"><div className={`search-wrap ${searchOpen ? 'open' : ''}`}><Search size={16} /><input type="text" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search transactions" aria-label="Search transactions" /></div><button className="icon-button search-button" aria-label="Search transactions" onClick={() => setSearchOpen((value) => !value)}><Search size={19} /></button><div className="profile-menu-wrap"><button className="topbar-avatar" title="User Profile" type="button" onClick={() => setProfileMenuOpen((value) => !value)}>FT</button>{profileMenuOpen && <div className="profile-menu"><button type="button" className="profile-menu-item" onClick={() => { setTheme((value) => value === 'light' ? 'dark' : 'light'); setProfileMenuOpen(false); }}><Settings size={15} />Settings</button><button type="button" className="profile-menu-item danger" onClick={handleLogout}><LogOut size={15} />Logout</button></div>}</div></div></header><div className="page-content"><div className="page-heading"><div><p className="eyebrow">{new Date().toLocaleDateString('en-IN', { dateStyle: 'full' })}</p><h1>Your financial snapshot <span>✦</span></h1><p className="subheading">Track your income and expenses for this month.</p></div><button className="primary-button" onClick={() => setIsModalOpen(true)}><Plus size={18} />Add transaction</button></div><div className="toolbar"><div className="overview-date-filter-group"><button className="date-filter" type="button" onClick={() => setFilterOpen((value) => !value)}><CalendarDays size={17} />{DATE_OPTIONS.find((option) => option.value === dateFilter)?.label || 'This month'}<ChevronDown size={15} /></button>{filterOpen && <div className="overview-date-filter-dropdown">{DATE_OPTIONS.map((option) => <button key={option.value} type="button" className={dateFilter === option.value ? 'selected' : ''} onClick={() => { setDateFilter(option.value); setFilterOpen(false); }}>{option.label}</button>)}</div>}</div><span className="updated">Synced with your account</span></div><section className="summary-grid"><SummaryCard type="balance" label="Total balance" value={money(balance)} change="Live" tone="balance" /><SummaryCard type="income" label="Total income" value={money(income)} change="Live" tone="income" /><SummaryCard type="expense" label="Total expenses" value={money(expenses)} change="Live" tone="expense" /></section><div className="dashboard-grid"><TransactionList transactions={visibleTransactions} onSeeAll={() => setShowAllTransactions((value) => !value)} showAll={showAllTransactions} /><ExpenseChart transactions={filtered} /></div></div></main>{isModalOpen && <AddTransactionModal onClose={() => setIsModalOpen(false)} onAdd={addTransaction} />}</div>;
 }

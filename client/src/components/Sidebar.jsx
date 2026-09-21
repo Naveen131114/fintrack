@@ -1,6 +1,7 @@
-import { BarChart3, LayoutDashboard, LogOut, PieChart, Settings, Tags, WalletCards, X } from 'lucide-react';
+import { BarChart3, Building2, Landmark, LayoutDashboard, LogOut, PieChart, QrCode, ScrollText, Settings, Tags, Users, WalletCards, X } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { getStoredUser, isBusinessUser as checkIsBusinessUser, isSuperAdmin as checkIsSuperAdmin, roleLabel } from '../utils/roles';
 
 const links = [
     { label: 'Overview', icon: LayoutDashboard, to: '/' },
@@ -13,8 +14,9 @@ const links = [
 
 export function Sidebar({ mobileMenuOpen = false, onCloseMobileMenu = () => { } }) {
     const navigate = useNavigate();
-    const user = JSON.parse(localStorage.getItem('fintrack_user') || 'null');
-    const isSuperAdmin = user?.role === 'super_admin';
+    const user = getStoredUser();
+    const showSuperAdmin = checkIsSuperAdmin(user);
+    const showBusiness = checkIsBusinessUser(user);
 
     const handleLogout = async () => {
         try {
@@ -30,8 +32,8 @@ export function Sidebar({ mobileMenuOpen = false, onCloseMobileMenu = () => { } 
         <button className="sidebar-close mobile-only" type="button" aria-label="Close menu" onClick={onCloseMobileMenu}><X size={18} /></button>
         <div className="brand"><span className="brand-mark">f</span><span>fintrack</span></div>
         <div className="workspace-label">Workspace</div>
-        <nav>{links.map(({ label, icon: ItemIcon, to }) => <NavLink className="nav-link" to={to} key={label} onClick={onCloseMobileMenu}><ItemIcon size={18} />{label}</NavLink>)}</nav>
-        <div className="sidebar-bottom">{isSuperAdmin && <><NavLink className="nav-link" to="/users" onClick={onCloseMobileMenu}><Settings size={18} />Users</NavLink><NavLink className="nav-link" to="/subscriptions" onClick={onCloseMobileMenu}><PieChart size={18} />Subscriptions</NavLink></>}<div className="profile"><div className="avatar">{user?.name?.slice(0, 2)?.toUpperCase() || 'FT'}</div><div><strong>{user?.name || 'Signed-in user'}</strong><span>{user?.role === 'super_admin' ? 'Super admin' : 'Personal account'}</span></div><button className="icon-button" onClick={handleLogout} aria-label="Log out"><LogOut size={18} /></button></div></div>
+        <nav>{links.map(({ label, icon: ItemIcon, to }) => <NavLink className="nav-link" to={to} key={label} onClick={onCloseMobileMenu}><ItemIcon size={18} />{label}</NavLink>)}{showBusiness && <><NavLink className="nav-link" to="/branches"><Building2 size={18} />Branches</NavLink><NavLink className="nav-link" to="/bank-accounts"><Landmark size={18} />Bank accounts</NavLink><NavLink className="nav-link" to="/upi-accounts"><QrCode size={18} />UPI accounts</NavLink><NavLink className="nav-link" to="/staff"><Users size={18} />Staff</NavLink><NavLink className="nav-link" to="/activity-logs"><ScrollText size={18} />Activity logs</NavLink></>}</nav>
+        <div className="sidebar-bottom">{showSuperAdmin && <><NavLink className="nav-link" to="/users" onClick={onCloseMobileMenu}><Settings size={18} />Users</NavLink><NavLink className="nav-link" to="/subscriptions" onClick={onCloseMobileMenu}><PieChart size={18} />Subscriptions</NavLink></>}<div className="profile"><div className="avatar">{user?.name?.slice(0, 2)?.toUpperCase() || 'FT'}</div><div><strong>{user?.name || 'Signed-in user'}</strong><span>{roleLabel(user?.role)}</span></div><button className="icon-button" onClick={handleLogout} aria-label="Log out"><LogOut size={18} /></button></div></div>
     </aside>;
 }
 

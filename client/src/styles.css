@@ -715,34 +715,45 @@ nav {
     font-size: 12px;
 }
 
-.plans-intro {
-    max-width: 610px;
-    margin: 6vh auto 38px;
-    text-align: center;
-}
-
-.plans-intro p:not(.eyebrow) {
-    color: var(--muted);
-    line-height: 1.6;
-}
-
 .plans-grid {
-    max-width: 900px;
+    max-width: 1000px;
+    margin: 0 auto 40px;
+    padding: 0 16px;
+}
+
+.plan-section-title {
+    margin: 0 0 16px;
+}
+
+/* shared grid */
+.plan-list {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 14px;
-    margin: auto;
+}
+
+/* Personal: 4 columns */
+.plan-list.personal-plans {
+    grid-template-columns: repeat(4, 1fr);
+}
+
+/* Business: 3 columns */
+.plan-list.business-plans {
+    grid-template-columns: repeat(3, 1fr);
 }
 
 .plan-card {
-    display: grid;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
     gap: 11px;
+    width: 100%;
     padding: 24px;
     text-align: left;
     border: 1px solid var(--line);
     border-radius: 10px;
     background: #fff;
     color: var(--ink);
+    cursor: pointer;
 }
 
 .plan-card strong {
@@ -756,6 +767,30 @@ nav {
 .plan-card.selected {
     border-color: var(--green);
     box-shadow: 0 0 0 2px var(--mint);
+}
+
+.plan-badge {
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--mint);
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+
+    .plan-list.personal-plans,
+    .plan-list.business-plans {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 560px) {
+
+    .plan-list.personal-plans,
+    .plan-list.business-plans {
+        grid-template-columns: 1fr;
+    }
 }
 
 .payment-instructions {
@@ -1373,4 +1408,49 @@ nav {
     color: #a13f32;
     background: #fbe9e5;
     border: 1px solid #efb8ad;
+}
+
+/* TopNavbar branch selector — border matches the rest of the UI */
+.topbar select {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 8px 10px;
+    font-size: 12px;
+    outline: none;
+}
+.topbar select:focus {
+    border-color: var(--green);
+}
+
+/* Transactions page toolbar: filters + export, left of the Add button */
+.txn-table-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.txn-table-tools select,
+.txn-table-tools button {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 8px 10px;
+    font-size: 12px;
+}
+.txn-table-tools button:hover {
+    background: var(--mint);
+    color: var(--green);
+}
+
+/* Totals row in the transactions data table */
+.data-table .total-row td {
+    border-top: 2px solid var(--line);
+    padding-top: 12px;
+}
+.data-table .total-amount {
+    font: 700 13px 'Manrope', sans-serif;
+    color: var(--ink);
 }

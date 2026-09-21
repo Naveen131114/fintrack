@@ -329,11 +329,9 @@ endstream`
 
     return pdf;
 }
-export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 8 }) {
+export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 8, dateFilter = 'all', typeFilter = 'All', onExportReady, showTotal = false }) {
     const [page, setPage] = useState(1);
     const isTransactionsTable = columns.some((column) => column.key === 'category') && columns.some((column) => column.key === 'type');
-    const [dateFilter, setDateFilter] = useState('this-month');
-    const [typeFilter, setTypeFilter] = useState('All');
     const filteredRows = isTransactionsTable ? rows.filter((row) => {
         const today = new Date();
         const year = today.getFullYear();
@@ -349,8 +347,10 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
     }) : rows;
     const pages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
     const current = filteredRows.slice((page - 1) * pageSize, page * pageSize);
+    const totalAmount = isTransactionsTable ? filteredRows.reduce((sum, row) => sum + Number(row.amount || 0), 0) : 0;
     const exportRows = (format) => {
         const data = filteredRows.map((row) => [row.type, row.category, new Date(row.date).toLocaleDateString('en-IN'), Number(row.amount || 0).toFixed(2), row.description || row.title || '']);
+        if (isTransactionsTable) data.push(['', '', '', totalAmount.toFixed(2), 'Total']);
         const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         const table = `<table border="1" style="border-collapse:collapse;font-family:Arial;font-size:11pt"><thead><tr>${['Type', 'Category', 'Date', 'Amount', 'Description'].map((header) => `<th style="background:#e3f2eb;padding:6px;text-align:left">${header}</th>`).join('')}</tr></thead><tbody>${data.map((row) => `<tr>${row.map((value, index) => `<td style="padding:6px;${index === 2 ? 'mso-number-format:\@;width:120px;' : ''}">${escapeHtml(value)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
         let content;
@@ -377,5 +377,7 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
         link.click();
         URL.revokeObjectURL(url);
     };
-    return <><div className="data-table-tools">{isTransactionsTable && <><select value={dateFilter} onChange={(event) => { setDateFilter(event.target.value); setPage(1); }} aria-label="Filter by date"><option value="today">Today</option><option value="this-week">This week</option><option value="this-month">This month</option><option value="last-month">Last month</option><option value="last-3-months">Last 3 months</option><option value="all">All dates</option></select><select value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); setPage(1); }} aria-label="Filter by type"><option>All</option><option>Income</option><option>Expense</option></select><span className="export-label">Export as</span>{['xl', 'word', 'pdf'].map((format) => <button type="button" key={format} onClick={() => exportRows(format)}>{format === 'xl' ? 'XL' : format[0].toUpperCase() + format.slice(1)}</button>)}</>}</div><div className="data-table-wrap"><table className="data-table"><thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Actions</th></tr></thead><tbody>{current.map((row) => <tr key={row._id || row.id}>{columns.map((column) => <td key={column.key}>{column.render ? column.render(row) : row[column.key] || '-'}</td>)}<td className="table-actions"><button className="table-icon" onClick={() => onEdit?.(row)} aria-label="Edit"><Pencil size={15} /></button><button className="table-icon delete" onClick={() => onDelete?.(row)} aria-label="Delete"><Trash2 size={15} /></button></td></tr>)}</tbody></table>{!current.length && <div className="empty-state">No records found.</div>}</div><div className="pagination"><span>Showing {current.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length}</span><div><button className="table-icon" disabled={page === 1} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button><button className="table-icon" disabled={page === pages} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button></div></div></>;
+    const totalRow = (showTotal && isTransactionsTable) ? <tr className="total-row"><td></td><td></td><td></td><td className="total-amount">{'₹' + totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td><strong>Total</strong></td><td></td></tr> : null;
+    if (onExportReady) onExportReady.current = exportRows;
+    return <><div className="data-table-tools" /><div className="data-table-wrap"><table className="data-table"><thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Actions</th></tr></thead><tbody>{current.map((row) => <tr key={row._id || row.id}>{columns.map((column) => <td key={column.key}>{column.render ? column.render(row) : row[column.key] || '-'}</td>)}<td className="table-actions"><button className="table-icon" onClick={() => onEdit?.(row)} aria-label="Edit"><Pencil size={15} /></button><button className="table-icon delete" onClick={() => onDelete?.(row)} aria-label="Delete"><Trash2 size={15} /></button></td></tr>)}{totalRow}</tbody></table>{!current.length && <div className="empty-state">No records found.</div>}</div><div className="pagination"><span>Showing {current.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length}</span><div><button className="table-icon" disabled={page === 1} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button><button className="table-icon" disabled={page === pages} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button></div></div></>;
 }
