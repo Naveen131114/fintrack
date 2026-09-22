@@ -23,7 +23,7 @@ async function validateBusinessTransaction(req, payload, existing) {
     } else { payload.bankAccountId = undefined; payload.upiAccountId = undefined; payload.transactionNumber = undefined; }
     return payload;
 }
-async function audit(req, action, transaction, changes) { if (req.user.role === 'business_staff') await ActivityLog.create({ businessOwnerId: req.user.businessOwnerId, staffUserId: req.user.id, action, module: 'transaction', recordId: transaction._id, description: `${req.user.userName} ${action} transaction #${transaction._id}`, changes }); }
+async function audit(req, action, transaction, changes) { if (req.user.role === 'business_staff') await ActivityLog.create({ businessOwnerId: req.user.businessOwnerId, staffUserId: req.user.id, action, module: 'transaction', recordId: transaction._id, description: `${req.user.userName} ${action} transaction`, changes }); }
 
 export async function listTransactions(req, res, next) 
 {

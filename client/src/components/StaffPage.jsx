@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../services/api';
+import DataTable from './DataTable';
+import { getStoredUser } from '../utils/roles';
 
 const EMPTY = {
     name: '',
@@ -8,17 +10,13 @@ const EMPTY = {
     password: '',
     phoneNumber: '',
     permissionLevel: 'view',
-    branchIds: [],
-    subscriptionPlan: '',
-    subscriptionStartDate: '',
-    subscriptionEndDate: ''
+    branchIds: []
 };
 const OBJECT_ID = /^[a-fA-F0-9]{24}$/;
 
 export default function StaffPage() {
     const [rows, setRows] = useState([]);
     const [branches, setBranches] = useState([]);
-    const [plans, setPlans] = useState([]);
     const [form, setForm] = useState(EMPTY);
     const [editing, setEditing] = useState(null);
     const [open, setOpen] = useState(false);
@@ -40,7 +38,6 @@ export default function StaffPage() {
         const staff = await api.business.staff.list().catch((err) => { setError(err.message); return null; });
         if (staff !== null) setRows(Array.isArray(staff) ? staff : []);
         await loadBranches();
-        api.subscriptions.list().then((items) => setPlans((Array.isArray(items) ? items : []).filter((p) => p.planType === 'business' && p.status === 'active'))).catch(() => { });
     };
 
     const toggleBranch = (id) => setForm((p) => ({ ...p, branchIds: p.branchIds.includes(id) ? p.branchIds.filter((b) => b !== id) : [...p.branchIds, id] }));
@@ -54,10 +51,7 @@ export default function StaffPage() {
             password: '',
             phoneNumber: row.phoneNumber || '',
             permissionLevel: row.permissionLevel || 'view',
-            branchIds: (row.allowedBranches || []).map((b) => String(b?._id ?? b)),
-            subscriptionPlan: row.subscriptionPlan || '',
-            subscriptionStartDate: row.subscriptionStartDate ? new Date(row.subscriptionStartDate).toISOString().slice(0, 10) : '',
-            subscriptionEndDate: row.subscriptionEndDate ? new Date(row.subscriptionEndDate).toISOString().slice(0, 10) : ''
+            branchIds: (row.allowedBranches || []).map((branch) => String(branch?._id ?? branch))
         });
         setOpen(true); loadBranches();
     };
@@ -68,16 +62,15 @@ export default function StaffPage() {
         const branchIds = form.branchIds.filter((id) => OBJECT_ID.test(id));
         if (!branchIds.length) { setError('Select at least one branch from the list (staff login requires branch access)'); return; }
         try {
+            // Subscription dates are NOT entered by the user — the server inherits them
+            // automatically from the business owner's subscription plan.
             const payload = {
                 name: form.name.trim(),
                 userName: form.userName.trim(),
                 emailId: form.emailId.trim(),
                 phoneNumber: form.phoneNumber.trim(),
                 permissionLevel: form.permissionLevel,
-                allowedBranches: branchIds,
-                subscriptionPlan: form.subscriptionPlan || undefined,
-                subscriptionStartDate: form.subscriptionStartDate || undefined,
-                subscriptionEndDate: form.subscriptionEndDate || undefined
+                allowedBranches: branchIds
             };
             if (!editing || form.password) payload.password = form.password;
             if (editing) await api.business.staff.update(editing._id, payload); else await api.business.staff.create(payload);
@@ -88,6 +81,27 @@ export default function StaffPage() {
 
     useEffect(() => { load(); }, []);
 
+    const owner = getStoredUser();
+    const ownerStartDate = owner?.subscriptionStartDate;
+    const ownerEndDate = owner?.subscriptionEndDate;
+
+    const ownerPlanName = owner?.subscriptionPlan;
+
+    const columns = [
+        { key: 'name', label: 'Name' },
+        { key: 'userName', label: 'Username' },
+        { key: 'emailId', label: 'Email' },
+        { key: 'phoneNumber', label: 'Phone' },
+        { key: 'permissionLevel', label: 'Permission' },
+        { key: 'allowedBranches', label: 'Branches', render: (row) => (row.allowedBranches || []).map((b) => b?.branchName || b).filter(Boolean).join(', ') || '-' },
+        // Subscription details are inherited from owner's plan by the server,
+        // but show them here with fallback to owner dates.
+        // { key: 'subscriptionPlan', label: 'Plan', render: (row) => row.subscriptionPlan || owner?.subscriptionPlan || "Owner's plan" },
+        // { key: 'subscriptionStartDate', label: 'Sub. start', render: (row) => (row.subscriptionStartDate || ownerStartDate) ? new Date(row.subscriptionStartDate || ownerStartDate).toLocaleDateString('en-IN') : '-' },
+        // { key: 'subscriptionEndDate', label: 'Sub. end', render: (row) => (row.subscriptionEndDate || ownerEndDate) ? new Date(row.subscriptionEndDate || ownerEndDate).toLocaleDateString('en-IN') : '-' },
+        { key: 'status', label: 'Status' }
+    ];
+
     return <div className="resource-page">
         <div className="resource-heading">
             <div><p className="eyebrow">Team access</p><h1>Staff</h1><p className="subheading">Invite staff logins and limit them to selected branches.</p></div>
@@ -97,27 +111,16 @@ export default function StaffPage() {
         {error && <div className="error-banner">{error}</div>}
         {branchError && <div className="error-banner">Branches: {branchError}</div>}
         <section className="panel resource-panel">
-            <p className="subheading">Staff count: {rows.length}</p>
-            {!rows.length && <div className="empty-state">No staff yet.</div>}
-            {rows.map((row) => <div key={row._id} className="approval-card">
-                <div>
-                    <strong>{row.name}</strong>
-                    <p>{row.userName}</p>
-                    <p>Branches: {String((row.allowedBranches || []).length)}</p>
-                    <p>Permission: {row.permissionLevel || '-'}</p>
-                    {row.subscriptionPlan && <p>Plan: {row.subscriptionPlan}</p>}
-                    {row.subscriptionEndDate && <p>Subscription ends: {new Date(row.subscriptionEndDate).toLocaleDateString('en-IN')}</p>}
-                </div>
-                <div className="approval-actions"><button className="primary-button" onClick={() => startEdit(row)}>Edit</button></div>
-            </div>)}
+            {/* <p className="subheading">Staff count: {rows.length}</p> */}
+            <DataTable columns={columns} rows={rows} onEdit={(row) => startEdit(row)} />
         </section>
         {open && <div className="modal-backdrop">
-            <div className="modal">
+            <div className="modal modal-two-column">
                 <div className="modal-heading">
                     <div><p className="eyebrow">{editing ? 'Edit staff login' : 'New staff login'}</p><h2>{editing ? 'Edit staff' : 'Add staff'}</h2></div>
                     <button className="icon-button" onClick={() => setOpen(false)}>×</button>
                 </div>
-                <form onSubmit={submit}>
+                <form className="modal-form-two-column" onSubmit={submit}>
                     <label>Name<input value={form.name} onChange={(ev) => setForm({ ...form, name: ev.target.value })} required /></label>
                     <label>Username<input value={form.userName} onChange={(ev) => setForm({ ...form, userName: ev.target.value })} required /></label>
                     <label>Email<input type="email" value={form.emailId} onChange={(ev) => setForm({ ...form, emailId: ev.target.value })} required /></label>
@@ -128,13 +131,12 @@ export default function StaffPage() {
                         <option value="edit">Edit</option>
                         <option value="full">Full</option>
                     </select></label>
-                    {plans.length > 0 && <label>Subscription plan<select value={form.subscriptionPlan} onChange={(ev) => setForm({ ...form, subscriptionPlan: ev.target.value })}>
-                        <option value="">Owner's plan</option>
-                        {plans.map((plan) => <option key={plan._id} value={plan.planName}>{plan.planName} (₹{Number(plan.amount || 0).toLocaleString('en-IN')})</option>)}
-                    </select></label>}
-                    <label>Subscription start date<input type="date" value={form.subscriptionStartDate} onChange={(ev) => setForm({ ...form, subscriptionStartDate: ev.target.value })} /></label>
-                    <label>Subscription end date<input type="date" value={form.subscriptionEndDate} onChange={(ev) => setForm({ ...form, subscriptionEndDate: ev.target.value })} /></label>
-                    <label>Allowed branches
+                    <div className="readonly-info full-width">
+                        <p>Subscription dates are taken automatically from your business subscription plan.</p>
+                        {ownerStartDate && <p>Start date: {new Date(ownerStartDate).toLocaleDateString('en-IN')}</p>}
+                        {ownerEndDate && <p>End date: {new Date(ownerEndDate).toLocaleDateString('en-IN')}</p>}
+                    </div>
+                    <label className="full-width">Allowed branches
                         <div className="branch-checkboxes">
                             {branchLoading && <span>Loading…</span>}
                             {!branchLoading && !branches.length && <span className="field-hint">No branches available — create one under Branches first</span>}
@@ -145,7 +147,7 @@ export default function StaffPage() {
                             })}
                         </div>
                     </label>
-                    <button className="primary-button modal-submit">Save</button>
+                    <button className="primary-button modal-submit full-width">Save</button>
                 </form>
             </div>
         </div>}
