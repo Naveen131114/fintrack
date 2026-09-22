@@ -859,6 +859,49 @@ nav {
     gap: 15px;
 }
 
+/* Two-column modal form layout */
+.modal-two-column {
+    width: min(100%, 680px);
+}
+
+.modal .modal-form-two-column {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    align-items: start;
+}
+
+.modal .modal-form-two-column > label.full-width,
+.modal .modal-form-two-column > div.full-width,
+.modal .modal-form-two-column > .modal-submit {
+    grid-column: 1 / -1;
+}
+
+.modal .modal-form-two-column .branch-checkboxes {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+}
+
+.modal .modal-form-two-column .readonly-info {
+    padding: 10px 12px;
+    background: var(--mint);
+    border-radius: 6px;
+    font-size: 11px;
+    color: #5a6c67;
+}
+
+.modal .modal-form-two-column .readonly-info p {
+    margin: 0;
+    line-height: 1.6;
+}
+
+@media (max-width: 520px) {
+    .modal .modal-form-two-column {
+        grid-template-columns: 1fr;
+    }
+}
+
 .modal label {
     display: block;
     gap: 7px;
@@ -1453,4 +1496,10 @@ nav {
 .data-table .total-amount {
     font: 700 13px 'Manrope', sans-serif;
     color: var(--ink);
+}
+.data-table .total-amount.income {
+    color: var(--green);
+}
+.data-table .total-amount.expense {
+    color: var(--coral);
 }

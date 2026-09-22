@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 function createPdf(rows) {
     const escapePdf = (value) =>
@@ -9,20 +9,49 @@ function createPdf(rows) {
             .replace(/\)/g, '\\)')
             .replace(/[^\x20-\x7E]/g, '');
 
-    const headers = ['Type', 'Category', 'Date', 'Amount', 'Description'];
+    // Same order as XL / Word / UI table
+    const headers = [
+        'Type',
+        'Category',
+        'Date',
+        'Description',
+        'Amount'
+    ];
 
-    const columnX = [36, 125, 225, 315, 390];
-    const columnWidths = [89, 100, 90, 75, 186];
-
-    const rowHeight = 22;
     const pageWidth = 612;
     const pageHeight = 792;
 
-    const topY = 750;
+    const tableLeft = 36;
+    const tableRight = 576;
+    const tableWidth = tableRight - tableLeft;
+
+    // Total = 540
+    const columnWidths = [
+        80,   // Type
+        110,  // Category
+        100,  // Date
+        160,  // Description
+        90    // Amount
+    ];
+
+    const columnX = [];
+    let currentX = tableLeft;
+
+    columnWidths.forEach((width) => {
+        columnX.push(currentX);
+        currentX += width;
+    });
+
+    const columnRight = columnX.map(
+        (x, index) => x + columnWidths[index]
+    );
+
+    const rowHeight = 24;
+    const tableTop = 755;
     const bottomMargin = 45;
 
     const rowsPerPage = Math.floor(
-        (topY - bottomMargin) / rowHeight
+        (tableTop - bottomMargin) / rowHeight
     );
 
     // Split rows into pages
@@ -36,62 +65,31 @@ function createPdf(rows) {
         pages.push([]);
     }
 
-    // ---------------------------------------------------------
-    // Create PDF content for one page
-    // ---------------------------------------------------------
     const createPageContent = (pageRows) => {
         const content = [];
 
-        // ---------------------------------------------------------
-        // Table configuration
-        // ---------------------------------------------------------
-
-        const tableLeft = 36;
-        const tableRight = 576;
-
-        const columnX = [
-            36,   // Type
-            125,  // Category
-            225,  // Date
-            315,  // Amount
-            390   // Description
-        ];
-
-        const columnRight = [
-            125,
-            225,
-            315,
-            390,
-            576
-        ];
-
-        const rowHeight = 24;
-
-        // Top of table
-        const tableTop = 755;
-        // ---------------------------------------------------------
+        // -----------------------------
         // PDF Heading
-        // ---------------------------------------------------------
-
+        // -----------------------------
         content.push('BT');
         content.push('/F1 16 Tf');
         content.push('1 0 0 1 36 765 Tm');
         content.push('(Transactions) Tj');
         content.push('ET');
-        // ---------------------------------------------------------
-        // Draw table borders FIRST
-        // ---------------------------------------------------------
 
+        // -----------------------------
+        // Table borders
+        // -----------------------------
         content.push('0.5 w');
 
-        // Outer top border
+        // Top border
         content.push(
             `${tableLeft} ${tableTop} m ${tableRight} ${tableTop} l S`
         );
 
-        // Horizontal lines
-        const totalRows = pageRows.length + 1; // +1 for header
+        const totalRows = pageRows.length + 1;
 
+        // Horizontal lines
         for (let i = 1; i <= totalRows; i++) {
             const y = tableTop - (i * rowHeight);
 
@@ -107,25 +105,21 @@ function createPdf(rows) {
         ];
 
         verticalLines.forEach((x) => {
-            const bottomY = tableTop - (totalRows * rowHeight);
+            const bottomY =
+                tableTop - (totalRows * rowHeight);
 
             content.push(
                 `${x} ${tableTop} m ${x} ${bottomY} l S`
             );
         });
 
-        // ---------------------------------------------------------
+        // -----------------------------
         // Text
-        // ---------------------------------------------------------
-
+        // -----------------------------
         content.push('BT');
         content.push('/F1 9 Tf');
 
         const textPadding = 6;
-
-        // ---------------------------------------------------------
-        // Helper for drawing text
-        // ---------------------------------------------------------
 
         const drawText = (text, x, y) => {
             content.push(
@@ -137,10 +131,9 @@ function createPdf(rows) {
             );
         };
 
-        // ---------------------------------------------------------
+        // -----------------------------
         // Header
-        // ---------------------------------------------------------
-
+        // -----------------------------
         const headerY = tableTop - 16;
 
         headers.forEach((header, index) => {
@@ -151,14 +144,11 @@ function createPdf(rows) {
             );
         });
 
-        // ---------------------------------------------------------
+        // -----------------------------
         // Data rows
-        // ---------------------------------------------------------
-
+        // -----------------------------
         pageRows.forEach((row, rowIndex) => {
 
-            // Each row gets its own vertical area.
-            // Text is positioned near the vertical center.
             const rowTop =
                 tableTop - ((rowIndex + 1) * rowHeight);
 
@@ -168,7 +158,7 @@ function createPdf(rows) {
 
                 let text = String(value ?? '');
 
-                // Prevent very long text from overflowing
+                // Maximum text length based on column
                 if (columnIndex === 0) {
                     text = text.slice(0, 14);
                 }
@@ -178,22 +168,21 @@ function createPdf(rows) {
                 }
 
                 if (columnIndex === 2) {
-                    text = text.slice(0, 14);
+                    text = text.slice(0, 16);
                 }
 
                 if (columnIndex === 3) {
-                    text = text.slice(0, 14);
+                    text = text.slice(0, 28);
                 }
 
                 if (columnIndex === 4) {
-                    text = text.slice(0, 32);
+                    text = text.slice(0, 16);
                 }
 
-                // -------------------------------------------------
-                // Amount column - right aligned
-                // -------------------------------------------------
-
-                if (columnIndex === 3) {
+                // -----------------------------
+                // Amount = Right aligned
+                // -----------------------------
+                if (columnIndex === 4) {
 
                     const estimatedTextWidth =
                         text.length * 5.2;
@@ -213,7 +202,7 @@ function createPdf(rows) {
 
                 } else {
 
-                    // Normal left alignment
+                    // Left aligned
                     drawText(
                         text,
                         columnX[columnIndex] + textPadding,
@@ -228,18 +217,17 @@ function createPdf(rows) {
         return content.join('\n');
     };
 
-    // ---------------------------------------------------------
+    // -----------------------------
     // PDF Objects
-    // ---------------------------------------------------------
-
+    // -----------------------------
     const objects = [];
 
-    // Object 1 - Catalog
+    // Catalog
     objects.push(
         '<< /Type /Catalog /Pages 2 0 R >>'
     );
 
-    // Object 2 - Pages
+    // Pages
     const pageObjectStart = 4;
     const pageObjectRefs = [];
 
@@ -256,20 +244,22 @@ function createPdf(rows) {
         `<< /Type /Pages /Kids [${pageObjectRefs.join(' ')}] /Count ${pages.length} >>`
     );
 
-    // Object 3 - Font
+    // Font
     objects.push(
         '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'
     );
 
-    // Page + Content objects
+    // Pages
     pages.forEach((pageRows, index) => {
+
         const pageObjectNumber =
             pageObjectStart + (index * 2);
 
         const contentObjectNumber =
             pageObjectNumber + 1;
 
-        const stream = createPageContent(pageRows);
+        const stream =
+            createPageContent(pageRows);
 
         // Page object
         objects.push(
@@ -295,15 +285,16 @@ endstream`
         );
     });
 
-    // ---------------------------------------------------------
+    // -----------------------------
     // Build PDF
-    // ---------------------------------------------------------
-
-    let pdf = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
+    // -----------------------------
+    let pdf =
+        '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
 
     const offsets = [0];
 
     objects.forEach((object, index) => {
+
         offsets.push(pdf.length);
 
         pdf += `${index + 1} 0 obj\n`;
@@ -318,11 +309,13 @@ endstream`
     pdf += `0000000000 65535 f \n`;
 
     for (let i = 1; i < offsets.length; i++) {
-        pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+        pdf +=
+            `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
     }
 
     pdf += `trailer\n`;
-    pdf += `<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
+    pdf +=
+        `<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
     pdf += `startxref\n`;
     pdf += `${xref}\n`;
     pdf += `%%EOF`;
@@ -331,6 +324,7 @@ endstream`
 }
 export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 8, dateFilter = 'all', typeFilter = 'All', onExportReady, showTotal = false }) {
     const [page, setPage] = useState(1);
+    useEffect(() => { setPage(1); }, [dateFilter, typeFilter, rows]);
     const isTransactionsTable = columns.some((column) => column.key === 'category') && columns.some((column) => column.key === 'type');
     const filteredRows = isTransactionsTable ? rows.filter((row) => {
         const today = new Date();
@@ -347,12 +341,72 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
     }) : rows;
     const pages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
     const current = filteredRows.slice((page - 1) * pageSize, page * pageSize);
-    const totalAmount = isTransactionsTable ? filteredRows.reduce((sum, row) => sum + Number(row.amount || 0), 0) : 0;
+    const totalAmount = isTransactionsTable ? filteredRows.reduce((sum, row) => {
+        const value = Number(row.amount || 0);
+        const normalizedType = String(row.type || '').trim().toLowerCase();
+        const isExpense = normalizedType === 'expense';
+        return sum + (isExpense ? -value : value);
+    }, 0) : 0;
     const exportRows = (format) => {
-        const data = filteredRows.map((row) => [row.type, row.category, new Date(row.date).toLocaleDateString('en-IN'), Number(row.amount || 0).toFixed(2), row.description || row.title || '']);
-        if (isTransactionsTable) data.push(['', '', '', totalAmount.toFixed(2), 'Total']);
+        const data = filteredRows.map((row) => [row.type, row.category, new Date(row.date).toLocaleDateString('en-IN'), row.description || row.title || '', Number(row.amount || 0).toFixed(2)]);
+        if (isTransactionsTable) data.push(['', '', '', 'Total', (totalAmount >= 0 ? '+' : '') + totalAmount.toFixed(2)]);
         const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        const table = `<table border="1" style="border-collapse:collapse;font-family:Arial;font-size:11pt"><thead><tr>${['Type', 'Category', 'Date', 'Amount', 'Description'].map((header) => `<th style="background:#e3f2eb;padding:6px;text-align:left">${header}</th>`).join('')}</tr></thead><tbody>${data.map((row) => `<tr>${row.map((value, index) => `<td style="padding:6px;${index === 2 ? 'mso-number-format:\@;width:120px;' : ''}">${escapeHtml(value)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+        const table = `
+<table
+    border="1"
+    style="
+        border-collapse:collapse;
+        font-family:Arial;
+        font-size:11pt;
+        width:100%;
+    "
+>
+    <thead>
+        <tr>
+            ${[
+                'Type',
+                'Category',
+                'Date',
+                'Description',
+                'Amount'
+            ].map((header) => `
+                <th style="
+                    background:#e3f2eb;
+                    padding:6px;
+                    text-align:left;
+                ">
+                    ${header}
+                </th>
+            `).join('')}
+        </tr>
+    </thead>
+
+    <tbody>
+        ${data.map((row) => `
+            <tr>
+                ${row.map((value, index) => `
+                    <td style="
+                        padding:6px;
+                        ${index === 2
+                    ? 'mso-number-format:\\@;width:100px;'
+                    : ''
+                }
+                        ${index === 3
+                    ? 'width:180px;'
+                    : ''
+                }
+                        ${index === 4
+                    ? 'width:90px;text-align:right;'
+                    : ''
+                }
+                    ">
+                        ${escapeHtml(value)}
+                    </td>
+                `).join('')}
+            </tr>
+        `).join('')}
+    </tbody>
+</table>`;
         let content;
         let type;
         let extension;
@@ -377,7 +431,7 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
         link.click();
         URL.revokeObjectURL(url);
     };
-    const totalRow = (showTotal && isTransactionsTable) ? <tr className="total-row"><td></td><td></td><td></td><td className="total-amount">{'₹' + totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td><strong>Total</strong></td><td></td></tr> : null;
+    const totalRow = (showTotal && isTransactionsTable) ? <tr className="total-row"><td></td><td></td><td></td><td><strong>Total</strong></td><td className={`total-amount ${totalAmount >= 0 ? 'income' : 'expense'}`}>{totalAmount >= 0 ? '+' : '-'}{'₹' + Math.abs(totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td></td></tr> : null;
     if (onExportReady) onExportReady.current = exportRows;
     return <><div className="data-table-tools" /><div className="data-table-wrap"><table className="data-table"><thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Actions</th></tr></thead><tbody>{current.map((row) => <tr key={row._id || row.id}>{columns.map((column) => <td key={column.key}>{column.render ? column.render(row) : row[column.key] || '-'}</td>)}<td className="table-actions"><button className="table-icon" onClick={() => onEdit?.(row)} aria-label="Edit"><Pencil size={15} /></button><button className="table-icon delete" onClick={() => onDelete?.(row)} aria-label="Delete"><Trash2 size={15} /></button></td></tr>)}{totalRow}</tbody></table>{!current.length && <div className="empty-state">No records found.</div>}</div><div className="pagination"><span>Showing {current.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length}</span><div><button className="table-icon" disabled={page === 1} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button><button className="table-icon" disabled={page === pages} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button></div></div></>;
 }
