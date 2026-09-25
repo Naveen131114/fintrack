@@ -1,13 +1,137 @@
 import { ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { api } from '../services/api';
+import { getStoredUser, isBusinessUser } from '../utils/roles';
 
-function createPdf(rows) {
+// Cached business PDF-template (logo + address from the business_owner).
+// Fetched once per page load for business users so owner + staff exports
+// share the same neat header; personal users never trigger this call.
+let brandingCache = null;
+let brandingCacheKey = null;
+let brandingPromise = null;
+export function clearBusinessBrandingCache(value = null) {
+    brandingCache = value;
+    brandingCacheKey = value ? brandingKeyFor(getStoredUser()) : null;
+    brandingPromise = null;
+}
+function brandingKeyFor(user) {
+    return String(user?.businessOwnerId || user?._id || user?.userName || '');
+}
+function getBusinessBranding() {
+    const user = getStoredUser();
+    if (!isBusinessUser(user)) return Promise.resolve(null);
+    const key = brandingKeyFor(user);
+    if (brandingCache && brandingCacheKey === key) return Promise.resolve(brandingCache);
+    if (!brandingPromise) {
+        brandingPromise = api.business.profile.get()
+            .then((profile) => {
+                brandingCache = (profile && profile.branded) ? profile : null;
+                brandingCacheKey = key;
+                return brandingCache;
+            })
+            .catch(() => null)
+            .finally(() => { brandingPromise = null; });
+    }
+    return brandingPromise;
+}
+
+const REPORT_MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+function formatDayMonthYear(date) {
+    return `${date.getDate()} ${REPORT_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function formatMonthYear(date) {
+    return `${REPORT_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function formatLast3MonthsLabel(now = new Date()) {
+    // Last 3 calendar months including current month: e.g. Sept 2026 -> July, August, September 2026
+    const months = [2, 1, 0].map((offset) => new Date(now.getFullYear(), now.getMonth() - offset, 1));
+    const years = new Set(months.map((d) => d.getFullYear()));
+    if (years.size === 1) {
+        return `${months.map((d) => REPORT_MONTH_NAMES[d.getMonth()]).join(', ')} ${months[0].getFullYear()}`;
+    }
+    // Year boundary (e.g. Nov 2025, Dec 2025, Jan 2026) -> keep year per month.
+    return months.map((d) => formatMonthYear(d)).join(', ');
+}
+
+function formatWeekLabel(now = new Date()) {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    if (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth()) {
+        return `${start.getDate()}-${end.getDate()} ${REPORT_MONTH_NAMES[start.getMonth()]} ${start.getFullYear()}`;
+    }
+    if (start.getFullYear() === end.getFullYear()) {
+        return `${start.getDate()} ${REPORT_MONTH_NAMES[start.getMonth()]} - ${end.getDate()} ${REPORT_MONTH_NAMES[end.getMonth()]} ${end.getFullYear()}`;
+    }
+    return `${formatDayMonthYear(start)} - ${formatDayMonthYear(end)}`;
+}
+
+function normalizeTypeLabel(typeFilter) {
+    const normalized = String(typeFilter || 'All').trim().toLowerCase();
+    if (!normalized || normalized === 'all') return 'All Transactions';
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+// Shared by all users/roles: single source for export heading + filename.
+// Examples:
+//  this-month + All     -> "September 2026 All Transactions Report"
+//  last-3-months + Income -> "July, August, September 2026 Income Report"
+export function getTransactionReportTitle(dateFilter = 'all', typeFilter = 'All', now = new Date()) {
+    const typeLabel = normalizeTypeLabel(typeFilter);
+    const isAllTypes = typeLabel === 'All Transactions';
+    switch (dateFilter) {
+        case 'today':
+            return `${formatDayMonthYear(now)} ${typeLabel} Report`;
+        case 'this-week':
+            return `${formatWeekLabel(now)} ${typeLabel} Report`;
+        case 'this-month':
+            return `${formatMonthYear(now)} ${typeLabel} Report`;
+        case 'last-month': {
+            const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            return `${formatMonthYear(d)} ${typeLabel} Report`;
+        }
+        case 'last-3-months':
+            return `${formatLast3MonthsLabel(now)} ${typeLabel} Report`;
+        case 'all':
+        default:
+            if (isAllTypes) return 'All Transactions Report';
+            return `All Time ${typeLabel} Report`;
+    }
+}
+
+function createPdf(rows, rawTitle = 'Transactions', branding = null) {
+    const title = String(rawTitle || 'Transactions');
+    // Neat business header: logo (left, width set by the owner as a % of the
+    // page) + business name + address flush to the right end, only when the
+    // owner holds an active *business* subscription plan and has saved the
+    // PDF template. Personal users keep the plain heading.
+    const header = (branding && branding.branded)
+        ? { name: String(branding.businessName || '').trim(), address: String(branding.businessAddress || '').trim(), logo: branding.businessLogo || null, logoWidthPercent: branding.businessLogoWidthPercent }
+        : null;
+    const hasHeader = Boolean(header && (header.name || header.address || header.logo));
     const escapePdf = (value) =>
         String(value)
             .replace(/\\/g, '\\\\')
             .replace(/\(/g, '\\(')
             .replace(/\)/g, '\\)')
             .replace(/[^\x20-\x7E]/g, '');
+
+    // Rough Helvetica advance width (~0.5em average) - good enough to
+    // right-align the business block and centre the report title.
+    const estimateTextWidth = (text, size) => String(text).length * size * 0.5;
+    const round = (value) => Math.round(value * 100) / 100;
+    // Logo width is chosen by the owner as a % of the PDF page width
+    // (US Letter = 612pt). Clamp so a bad value can't break the header.
+    const requestedLogoWidth = Number(header && header.logoWidthPercent);
+    const logoWidthPercent = Number.isFinite(requestedLogoWidth) && requestedLogoWidth > 0
+        ? Math.min(25, requestedLogoWidth)
+        : 8;
 
     // Same order as XL / Word / UI table
     const headers = [
@@ -47,7 +171,9 @@ function createPdf(rows) {
     );
 
     const rowHeight = 24;
-    const tableTop = 755;
+    // Branded business header sits above the report title, so the table
+    // starts lower to keep a neat gap (title baseline 690 -> top border 672).
+    const tableTop = hasHeader ? 672 : 755;
     const bottomMargin = 45;
 
     const rowsPerPage = Math.floor(
@@ -55,26 +181,95 @@ function createPdf(rows) {
     );
 
     // Split rows into pages
-    const pages = [];
+    const pdfPages = [];
 
     for (let i = 0; i < rows.length; i += rowsPerPage - 1) {
-        pages.push(rows.slice(i, i + rowsPerPage - 1));
+        pdfPages.push(rows.slice(i, i + rowsPerPage - 1));
     }
 
-    if (!pages.length) {
-        pages.push([]);
+    if (!pdfPages.length) {
+        pdfPages.push([]);
     }
 
-    const createPageContent = (pageRows) => {
+    const createPageContent = (pageRows, pageTitle) => {
         const content = [];
+        let titleY = 770;
+        if (hasHeader) {
+            content.push('0.75 w');
+            content.push('0.55 0.55 0.55 RG');
+            content.push(`${tableLeft} 706 m ${tableRight} 706 l S`);
+            content.push('0 0 0 RG');
+
+            // Logo sits on the left edge; width = owner-defined % of the page
+            // width, height follows the image aspect ratio.
+            let logoWidth = 0;
+            let logoHeight = 0;
+            if (header.logo && logoImage) {
+                logoWidth = pageWidth * (logoWidthPercent / 100);
+                logoHeight = logoWidth * (logoImage.height / logoImage.width);
+                // Keep very tall logos inside the band above the divider.
+                const maxLogoHeight = 68;
+                if (logoHeight > maxLogoHeight) {
+                    logoHeight = maxLogoHeight;
+                    logoWidth = logoHeight * (logoImage.width / logoImage.height);
+                }
+            }
+            // Text block never runs into the logo.
+            const textLeftLimit = tableLeft + logoWidth + 12;
+            const fitToWidth = (text, size) => {
+                let value = String(text);
+                while (value.length > 1 && tableRight - estimateTextWidth(value, size) < textLeftLimit) {
+                    value = value.slice(0, -1);
+                }
+                return value;
+            };
+
+            // Business name + address aligned to the right end of the header.
+            let cursorY = 762;
+            if (header.name) {
+                const name = fitToWidth(header.name.slice(0, 60), 13);
+                content.push('BT');
+                content.push('/F1 13 Tf');
+                content.push(`1 0 0 1 ${round(tableRight - estimateTextWidth(name, 13))} ${cursorY} Tm`);
+                content.push(`(${escapePdf(name)}) Tj`);
+                content.push('ET');
+                cursorY -= 14;
+            }
+            if (header.address) {
+                const lines = header.address.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 3);
+                content.push('BT');
+                content.push('/F1 8 Tf');
+                content.push('0.35 0.35 0.35 rg');
+                lines.forEach((line, i) => {
+                    const text = fitToWidth(line.slice(0, 80), 8);
+                    const y = cursorY - (i * 10);
+                    content.push(`1 0 0 1 ${round(tableRight - estimateTextWidth(text, 8))} ${y} Tm`);
+                    content.push(`(${escapePdf(text)}) Tj`);
+                });
+                content.push('ET');
+                content.push('0 0 0 rg');
+            }
+            if (logoWidth) {
+                // Vertically centred in the band between the divider and the
+                // top of the page (706 -> 792).
+                const logoY = Math.min(786 - logoHeight, Math.max(708, 744 - (logoHeight / 2)));
+                content.push(`q ${round(logoWidth)} 0 0 ${round(logoHeight)} ${tableLeft} ${round(logoY)} cm /Logo Do Q`);
+            }
+            titleY = 690;
+        }
 
         // -----------------------------
-        // PDF Heading
+        // PDF Heading (dynamic report title, e.g. "September 2026 All Transactions Report")
         // -----------------------------
+        const headingSize = pageTitle.length > 42 ? 12 : 14;
+        // Export-filter summary (e.g. "September 2026 All Transactions Report")
+        // centred across the page.
+        const titleWidth = estimateTextWidth(pageTitle, headingSize);
+        const titleX = Math.max(tableLeft, (pageWidth - titleWidth) / 2);
         content.push('BT');
-        content.push('/F1 16 Tf');
-        content.push('1 0 0 1 36 765 Tm');
-        content.push('(Transactions) Tj');
+        content.push(`/F1 ${headingSize} Tf`);
+        content.push(`1 0 0 1 ${round(titleX)} ${titleY} Tm`);
+        content.push(`(${escapePdf(pageTitle)}) Tj`);
         content.push('ET');
 
         // -----------------------------
@@ -218,8 +413,49 @@ function createPdf(rows) {
     };
 
     // -----------------------------
-    // PDF Objects
+    // PDF Objects (binary-safe: logo JPEG bytes ride as latin1 chars)
     // -----------------------------
+    const byteLength = (str) => {
+        if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str).length;
+        return str.length;
+    };
+    const toBinary = (bytes) => {
+        let s = '';
+        for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+        return s;
+    };
+    function jpegSizeAndBody(dataUrl) {
+        try {
+            const base64 = String(dataUrl).split(',')[1] || '';
+            const bin = atob(base64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            // Scan JPEG SOF markers for width/height.
+            let width = 0;
+            let height = 0;
+            for (let i = 0; i < bytes.length - 1; i++) {
+                if (bytes[i] !== 0xFF) continue;
+                const marker = bytes[i + 1];
+                if (marker === 0xD8 || marker === 0xD9 || (marker >= 0xD0 && marker <= 0xD7) || marker === 0x01) continue;
+                if (i + 3 >= bytes.length) break;
+                const len = (bytes[i + 2] << 8) + bytes[i + 3];
+                if (marker >= 0xC0 && marker <= 0xCF && marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
+                    height = (bytes[i + 5] << 8) + bytes[i + 6];
+                    width = (bytes[i + 7] << 8) + bytes[i + 8];
+                    break;
+                }
+                i += len;
+            }
+            return { width: width || 1, height: height || 1, body: toBinary(bytes) };
+        } catch {
+            return null;
+        }
+    }
+
+    // Parse JPEG bytes before any page content is generated;
+    // createPageContent() closes over logoImage (declared here, invoked later).
+    const logoImage = hasHeader && header.logo ? jpegSizeAndBody(header.logo) : null;
+
     const objects = [];
 
     // Catalog
@@ -228,12 +464,12 @@ function createPdf(rows) {
     );
 
     // Pages
-    const pageObjectStart = 4;
+    const logoObjectNumber = logoImage ? (4 + (pdfPages.length * 2)) : null;
     const pageObjectRefs = [];
 
-    pages.forEach((_, index) => {
+    pdfPages.forEach((_, index) => {
         const pageObjectNumber =
-            pageObjectStart + (index * 2);
+            4 + (index * 2);
 
         pageObjectRefs.push(
             `${pageObjectNumber} 0 R`
@@ -241,7 +477,7 @@ function createPdf(rows) {
     });
 
     objects.push(
-        `<< /Type /Pages /Kids [${pageObjectRefs.join(' ')}] /Count ${pages.length} >>`
+        `<< /Type /Pages /Kids [${pageObjectRefs.join(' ')}] /Count ${pdfPages.length} >>`
     );
 
     // Font
@@ -250,40 +486,38 @@ function createPdf(rows) {
     );
 
     // Pages
-    pages.forEach((pageRows, index) => {
+    pdfPages.forEach((pageRows, index) => {
 
         const pageObjectNumber =
-            pageObjectStart + (index * 2);
+            4 + (index * 2);
 
         const contentObjectNumber =
             pageObjectNumber + 1;
 
         const stream =
-            createPageContent(pageRows);
+            createPageContent(pageRows, title);
 
         // Page object
         objects.push(
-            `<<
-                /Type /Page
-                /Parent 2 0 R
-                /MediaBox [0 0 ${pageWidth} ${pageHeight}]
-                /Resources <<
-                    /Font <<
-                        /F1 3 0 R
-                    >>
-                >>
-                /Contents ${contentObjectNumber} 0 R
-            >>`
+            `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R >>${logoImage ? ` /XObject << /Logo ${logoObjectNumber} 0 R >>` : ''} >> /Contents ${contentObjectNumber} 0 R >>`
         );
 
         // Content object
         objects.push(
-            `<< /Length ${stream.length} >>
+            `<< /Length ${byteLength(stream)} >>
 stream
 ${stream}
 endstream`
         );
     });
+
+    if (logoImage) {
+        // /Length must match the latin1 byte count: exportRows encodes the
+        // final string via charCodeAt & 0xFF (1 char -> 1 byte).
+        objects.push(
+            `<< /Type /XObject /Subtype /Image /Width ${logoImage.width} /Height ${logoImage.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logoImage.body.length} >>\nstream\n${logoImage.body}\nendstream`
+        );
+    }
 
     // -----------------------------
     // Build PDF
@@ -335,7 +569,8 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
         if (dateFilter === 'today') { start = new Date(year, month, today.getDate()); end = new Date(year, month, today.getDate() + 1); }
         if (dateFilter === 'this-week') { start = new Date(year, month, today.getDate() - today.getDay()); end = new Date(start); end.setDate(end.getDate() + 7); }
         if (dateFilter === 'last-month') { start = new Date(year, month - 1, 1); end = new Date(year, month, 1); }
-        if (dateFilter === 'last-3-months') start = new Date(year, month - 3, 1);
+        // Last 3 calendar months including current month (Sep 2026 -> Jul, Aug, Sep).
+        if (dateFilter === 'last-3-months') start = new Date(year, month - 2, 1);
         const date = new Date(row.date);
         return (typeFilter === 'All' || row.type === typeFilter) && (dateFilter === 'all' || (date >= start && date < end));
     }) : rows;
@@ -347,7 +582,9 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
         const isExpense = normalizedType === 'expense';
         return sum + (isExpense ? -value : value);
     }, 0) : 0;
-    const exportRows = (format) => {
+    const exportRows = async (format) => {
+        const reportTitle = isTransactionsTable ? getTransactionReportTitle(dateFilter, typeFilter) : 'Transactions Report';
+        const fileBase = reportTitle.replace(/[\\/:*?"<>|]/g, '').trim() || 'Transactions Report';
         const data = filteredRows.map((row) => [row.type, row.category, new Date(row.date).toLocaleDateString('en-IN'), row.description || row.title || '', Number(row.amount || 0).toFixed(2)]);
         if (isTransactionsTable) data.push(['', '', '', 'Total', (totalAmount >= 0 ? '+' : '') + totalAmount.toFixed(2)]);
         const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -411,23 +648,35 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
         let type;
         let extension;
         if (format === 'xl') {
-            content = `<html><head><meta charset="utf-8"></head><body><h2>Transactions</h2>${table}</body></html>`;
+            content = `<html><head><meta charset="utf-8"></head><body><h2 style="text-align:center">${escapeHtml(reportTitle)}</h2>${table}</body></html>`;
             type = 'application/vnd.ms-excel';
             extension = 'xls';
         } else if (format === 'word') {
-            content = `<html><head><meta charset="utf-8"><style>table{border-collapse:collapse}th,td{border:1px solid #999;padding:6px}th{background:#e3f2eb}</style></head><body><h2>Transactions</h2>${table}</body></html>`;
+            content = `<html><head><meta charset="utf-8"><style>table{border-collapse:collapse}th,td{border:1px solid #999;padding:6px}th{background:#e3f2eb}</style></head><body><h2 style="text-align:center">${escapeHtml(reportTitle)}</h2>${table}</body></html>`;
             type = 'application/msword';
             extension = 'doc';
         } else {
-            content = createPdf(data);
-            type = 'application/pdf';
-            extension = 'pdf';
+            // PDF only: business subscription plan users get the neat
+            // logo + address letterhead from the owner's PDF template
+            // (owner and staff share it); personal users get plain PDF.
+            const branding = isTransactionsTable ? await getBusinessBranding() : null;
+            const pdfString = createPdf(data, reportTitle, branding);
+            const bytes = new Uint8Array(pdfString.length);
+            for (let i = 0; i < pdfString.length; i++) bytes[i] = pdfString.charCodeAt(i) & 0xFF;
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${fileBase}.pdf`;
+            link.click();
+            URL.revokeObjectURL(url);
+            return;
         }
         const blob = new Blob([content], { type });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `transactions.${extension}`;
+        link.download = `${fileBase}.${extension}`;
         link.click();
         URL.revokeObjectURL(url);
     };

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import DataTable from './DataTable';
+import AlertDialog from './AlertDialog';
 import { getStoredUser } from '../utils/roles';
 
 const EMPTY = {
@@ -21,7 +22,8 @@ export default function StaffPage() {
     const [editing, setEditing] = useState(null);
     const [open, setOpen] = useState(false);
     const [error, setError] = useState('');
-    const [message, setMessage] = useState('');
+        const [message, setMessage] = useState('');
+    const [deleteAlert, setDeleteAlert] = useState(null);
     const [branchError, setBranchError] = useState('');
     const [branchLoading, setBranchLoading] = useState(false);
 
@@ -76,7 +78,18 @@ export default function StaffPage() {
             if (editing) await api.business.staff.update(editing._id, payload); else await api.business.staff.create(payload);
             setMessage(editing ? 'Updated staff' : 'Added staff');
             setOpen(false); setEditing(null); await load();
-        } catch (err) { setError(err.message); }
+                } catch (err) { setError(err.message); }
+    };
+
+    const remove = async (staff) => {
+        try {
+            await api.business.staff.remove(staff._id);
+            setMessage('Staff removed');
+            setDeleteAlert(null);
+            await load();
+        } catch (err) {
+            setError(err.message);
+        }
     };
 
     useEffect(() => { load(); }, []);
@@ -112,8 +125,9 @@ export default function StaffPage() {
         {branchError && <div className="error-banner">Branches: {branchError}</div>}
         <section className="panel resource-panel">
             {/* <p className="subheading">Staff count: {rows.length}</p> */}
-            <DataTable columns={columns} rows={rows} onEdit={(row) => startEdit(row)} />
-        </section>
+                        <DataTable columns={columns} rows={rows} onEdit={(row) => startEdit(row)} onDelete={(row) => setDeleteAlert(row)} />
+                </section>
+        {deleteAlert && <AlertDialog open={true} title="Delete staff?" message={`This will permanently delete ${deleteAlert.name || deleteAlert.userName}`} confirmText="Delete" cancelText="Cancel" variant="destructive" onConfirm={() => remove(deleteAlert)} onCancel={() => setDeleteAlert(null)} />}
         {open && <div className="modal-backdrop">
             <div className="modal modal-two-column">
                 <div className="modal-heading">

@@ -92,3 +92,99 @@ export async function updateStaff(req, res, next) {
     } catch (e) { next(e); }
 }
 export async function activityLogs(req, res, next) { try { res.json(await ActivityLog.find({ businessOwnerId: ownerIdFor(req.user) }).populate('staffUserId', 'name userName').sort({ createdAt: -1 })); } catch (e) { next(e); } }
+export async function deleteStaff(req, res, next) {
+    try {
+        if (req.user.role !== 'business_owner') return res.status(403).json({ message: 'Only a business owner can manage staff' });
+        const ownerId = ownerIdFor(req.user);
+        const staff = await User.findOneAndDelete({ _id: req.params.id, businessOwnerId: ownerId, role: 'business_staff' });
+        if (!staff) return res.status(404).json({ message: 'Staff member not found' });
+        try { await ActivityLog.create({ businessOwnerId: ownerId, staffUserId: staff._id, action: 'delete_staff', module: 'staff', recordId: staff._id, description: `${req.user.userName} removed staff member ${staff.name || staff.userName}` }); } catch { }
+        res.status(204).end();
+    } catch (e) { next(e); }
+}
+
+// ---------------------------------------------------------------------------
+// PDF-template branding (Settings icon -> PDF Template, business_owner only).
+// The owner's businessName / businessAddress / businessLogo are stored on the
+// owner record; both owner and staff READ them so every business export PDF
+// carries the same neat header. Only an active *business* subscription plan
+// may use the branded header.
+// ---------------------------------------------------------------------------
+async function businessPlanFor(owner) {
+    if (!owner?.subscriptionPlan) return null;
+    return Subscription.findOne({ planName: owner.subscriptionPlan, planType: 'business', status: 'active' });
+}
+
+function sanitizeBranding(body = {}) {
+    const businessName = String(body.businessName || '').trim().slice(0, 120);
+    const businessAddress = String(body.businessAddress || '').trim().slice(0, 600);
+    let businessLogo = body.businessLogo;
+    if (businessLogo !== undefined && businessLogo !== null && businessLogo !== '') {
+        businessLogo = String(businessLogo);
+        if (!businessLogo.startsWith('data:image/jpeg;base64,') && !businessLogo.startsWith('data:image/jpg;base64,')) {
+            throw Object.assign(new Error('Logo must be a JPEG image'), { status: 400 });
+        }
+        // ~700KB JPEG cap (data URL ~ 950KB) so the User document stays small.
+        if (businessLogo.length > 950 * 1024) {
+            throw Object.assign(new Error('Logo image is too large. Please use an image under 700KB.'), { status: 400 });
+        }
+    } else {
+        businessLogo = null;
+    }
+    // Logo width (%) is optional: absent -> keep whatever is stored.
+    let businessLogoWidthPercent;
+    if (body.businessLogoWidthPercent !== undefined) {
+        const raw = String(body.businessLogoWidthPercent).trim();
+        const parsed = raw === '' ? 8 : Number(raw);
+        if (!Number.isFinite(parsed)) {
+            throw Object.assign(new Error('Logo width must be a percentage between 1 and 25'), { status: 400 });
+        }
+        businessLogoWidthPercent = Math.min(25, Math.max(1, parsed));
+    }
+    return { businessName, businessAddress, businessLogo, businessLogoWidthPercent };
+}
+
+export async function getBusinessProfile(req, res, next) {
+    try {
+        const ownerId = ownerIdFor(req.user);
+        const owner = await User.findById(ownerId).select('businessName businessAddress businessLogo businessLogoWidthPercent subscriptionPlan');
+        if (!owner) return res.status(404).json({ message: 'Business profile not found' });
+        const plan = await businessPlanFor(owner);
+        res.json({
+            businessName: owner.businessName || '',
+            businessAddress: owner.businessAddress || '',
+            businessLogo: owner.businessLogo || null,
+            businessLogoWidthPercent: Number(owner.businessLogoWidthPercent ?? 8),
+            // Staff can preview the header only when the plan is a business plan.
+            branded: Boolean(plan)
+        });
+    } catch (e) { next(e); }
+}
+
+export async function updateBusinessProfile(req, res, next) {
+    try {
+        if (req.user.role !== 'business_owner') return res.status(403).json({ message: 'Only a business owner can update the PDF template' });
+        const owner = await User.findById(req.user.id);
+        if (!owner) return res.status(404).json({ message: 'Business profile not found' });
+        const plan = await businessPlanFor(owner);
+        if (!plan) return res.status(403).json({ message: 'A business subscription plan is required for the branded PDF header' });
+        const branding = sanitizeBranding(req.body || {});
+        owner.businessName = branding.businessName;
+        owner.businessAddress = branding.businessAddress;
+        if (req.body.businessLogo !== undefined) {
+            // undefined key absent -> keep; explicit null/'' -> clear.
+            owner.businessLogo = branding.businessLogo;
+        }
+        if (branding.businessLogoWidthPercent !== undefined) {
+            owner.businessLogoWidthPercent = branding.businessLogoWidthPercent;
+        }
+        await owner.save();
+        res.json({
+            businessName: owner.businessName || '',
+            businessAddress: owner.businessAddress || '',
+            businessLogo: owner.businessLogo || null,
+            businessLogoWidthPercent: Number(owner.businessLogoWidthPercent ?? 8),
+            branded: true
+        });
+    } catch (e) { next(e); }
+}

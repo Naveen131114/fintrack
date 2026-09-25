@@ -1404,6 +1404,85 @@ nav {
     margin-top: 7px;
 }
 
+/* PDF Template settings (Settings icon -> PDF Template) */
+.modal label>textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--input);
+    color: var(--ink);
+    padding: 9px 10px;
+    font-size: 13px;
+    resize: vertical;
+}
+.logo-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+}
+.logo-preview {
+    width: 96px;
+    height: 96px;
+    object-fit: contain;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+}
+.logo-preview.logo-empty {
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    font-size: 11px;
+}
+.logo-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.logo-upload {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.pdf-template-preview {
+    margin-top: 14px;
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+}
+.pdf-template-preview-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+    background: var(--panel-alt);
+}
+.pdf-template-preview-card img {
+    width: 48px;
+    height: 48px;
+    object-fit: contain;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+}
+.pdf-template-preview-card div {
+    display: grid;
+    gap: 2px;
+    /* Mirrors the exported header: business block sits at the right end. */
+    margin-left: auto;
+    text-align: right;
+}
+.pdf-template-preview-card strong {
+    font-size: 13px;
+}
+.pdf-template-preview-card span {
+    font-size: 11px;
+    color: var(--muted);
+    white-space: pre-line;
+}
+
 .data-table-tools {
     display: flex;
     align-items: center;
