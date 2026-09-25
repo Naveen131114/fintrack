@@ -1,7 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './services/api';
+import DataTable from './components/DataTable';
+import { getStoredUser, isBusinessOwner, isBusinessUser } from './utils/roles';
 
 const money = (value) => `₹${Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+// Signed money for the report Balance column: "+₹1,200.00" / "-₹1,200.00"
+const signedMoney = (value) => `${Number(value) >= 0 ? '+' : '-'}₹${Math.abs(Number(value || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+
+const REPORT_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+// "YYYY-MM" -> "September 2026"
+function formatMonthLabel(value) {
+    const [year, month] = String(value || '').split('-');
+    const index = Number(month) - 1;
+    if (!year || !Number.isInteger(index) || index < 0 || index > REPORT_MONTH_NAMES.length - 1) return value || '-';
+    return `${REPORT_MONTH_NAMES[index]} ${year}`;
+}
 const upiMobileNumber = '8489294594';
 const upiQrUrl = import.meta.env.VITE_UPI_QR_URL || '/images/upi-qr.jpeg';
 
@@ -29,11 +43,211 @@ export function LoginPage() {
 }
 
 export function AnalyticsPage() {
+    const user = getStoredUser();
+    // Business PLAN logins get the Overall Report; everyone else keeps Transaction mix.
+    const businessUser = isBusinessUser(user);
+    const canManageReports = isBusinessOwner(user);
+
+    // Branch filter: the top navbar branch selector is the single source of
+    // truth (same pattern as TransactionsPage) and the money-flow cards plus
+    // the Overall Report below both follow it.
+    const [selectedBranchId, setSelectedBranchId] = useState(() => localStorage.getItem('fintrack_selected_branch') || 'ALL');
+    const [branches, setBranches] = useState([]);
+
+    // A new report row starts on the branch being filtered, so the owner
+    // rarely has to pick it manually.
+    const defaultBranchId = selectedBranchId === 'ALL' ? '' : selectedBranchId;
+    const newReportForm = (branchId = defaultBranchId) => ({ month: new Date().toISOString().slice(0, 7), branchId, clientsCount: '', income: '', expenses: '' });
+
     const [rows, setRows] = useState([]);
-    useEffect(() => { api.transactions.list().then(setRows).catch(() => { }); }, []);
+    // Money-flow cards follow the branch filter (the server scopes by branchId).
+    useEffect(() => { api.transactions.list(selectedBranchId).then(setRows).catch(() => setRows([])); }, [selectedBranchId]);
     const income = rows.filter((row) => row.type === 'Income').reduce((sum, row) => sum + row.amount, 0);
     const expense = rows.filter((row) => row.type === 'Expense').reduce((sum, row) => sum + row.amount, 0);
-    return <div className="resource-page"><p className="eyebrow">Insights</p><h1>Analytics</h1><p className="subheading">A clear view of your money flow.</p><div className="summary-grid analytics-cards"><div className="summary-card income"><span>Income</span><strong className="summary-value">{money(income)}</strong></div><div className="summary-card expense"><span>Expenses</span><strong className="summary-value">{money(expense)}</strong></div><div className="summary-card balance"><span>Net cash flow</span><strong className="summary-value">{money(income - expense)}</strong></div></div><section className="panel insight-panel"><h2>Transaction mix</h2><div className="bar-track"><span className="income-bar" style={{ width: `${income + expense ? income / (income + expense) * 100 : 0}%` }} /></div><p className="subheading">Income versus expenses across your recorded transactions.</p></section></div>;
+
+    // Overall report: only business PLAN logins get it. `null` = plan check running.
+    const [hasBusinessPlan, setHasBusinessPlan] = useState(null);
+    const [reports, setReports] = useState([]);
+    const [reportForm, setReportForm] = useState(() => newReportForm());
+    const [editing, setEditing] = useState(null);
+    const [reportMessage, setReportMessage] = useState('');
+    const [reportError, setReportError] = useState('');
+    const exportRef = useRef(null);
+
+    // Branches power the report's Branch column and the picker in its form.
+    useEffect(() => {
+        if (!businessUser) return undefined;
+        api.business.branches.list().then(setBranches).catch(() => setBranches([]));
+        return undefined;
+    }, []);
+
+    // Follow the navbar branch selector, exactly like TransactionsPage.
+    useEffect(() => {
+        const handler = () => setSelectedBranchId(localStorage.getItem('fintrack_selected_branch') || 'ALL');
+        window.addEventListener('fintrack-branch-change', handler);
+        return () => window.removeEventListener('fintrack-branch-change', handler);
+    }, []);
+
+    const loadReports = () => api.reports.list(selectedBranchId).then(setReports).catch(() => setReports([]));
+
+    useEffect(() => {
+        if (!businessUser) return undefined;
+        let cancelled = false;
+        api.business.profile.get()
+            .then((profile) => {
+                if (cancelled) return;
+                setHasBusinessPlan(Boolean(profile.branded));
+            })
+            .catch(() => { if (!cancelled) setHasBusinessPlan(false); });
+        return () => { cancelled = true; };
+    }, []);
+
+    // The Overall Report obeys the same branch filter as the cards, and reloads
+    // whenever the navbar branch changes.
+    useEffect(() => {
+        if (hasBusinessPlan !== true) return undefined;
+        let cancelled = false;
+        api.reports.list(selectedBranchId)
+            .then((items) => { if (!cancelled) setReports(items); })
+            .catch(() => { if (!cancelled) setReports([]); });
+        return () => { cancelled = true; };
+    }, [hasBusinessPlan, selectedBranchId]);
+
+    // Switching branch leaves edit mode (the edited row may not even be in the
+    // newly selected branch) and re-seeds the form's default branch.
+    useEffect(() => {
+        setEditing(null);
+        setReportForm(newReportForm());
+    }, [selectedBranchId]);
+
+    const setReportField = (key) => (event) => setReportForm((form) => ({ ...form, [key]: event.target.value }));
+
+    // One row per month per branch: saving an existing month + branch updates it.
+    const saveReport = async (event) => {
+        event.preventDefault();
+        setReportError('');
+        setReportMessage('');
+        const payload = {
+            month: reportForm.month,
+            branchId: reportForm.branchId || null,
+            clientsCount: Number(reportForm.clientsCount),
+            income: Number(reportForm.income),
+            expenses: Number(reportForm.expenses)
+        };
+        try {
+            await api.reports.create(payload);
+            // Editing moved the row to another month or branch -> drop the old
+            // one. The new row is saved first, so nothing is ever lost.
+            const keyChanged = editing && (editing.month !== payload.month || String(editing.branchId || '') !== String(payload.branchId || ''));
+            if (keyChanged) await api.reports.remove(editing._id);
+            setReportMessage(editing ? 'Report updated' : 'Report saved');
+            setEditing(null);
+            setReportForm(newReportForm());
+            loadReports();
+        } catch (error) {
+            setReportError(error.message);
+        }
+    };
+
+    const editReport = (row) => {
+        setEditing(row);
+        setReportError('');
+        setReportMessage('');
+        setReportForm({ month: row.month, branchId: row.branchId || '', clientsCount: String(row.clientsCount ?? ''), income: String(row.income ?? ''), expenses: String(row.expenses ?? '') });
+    };
+
+    const cancelEdit = () => {
+        setEditing(null);
+        setReportForm(newReportForm());
+    };
+
+    const removeReport = async (row) => {
+        if (!window.confirm('Delete this report row?')) return;
+        try {
+            await api.reports.remove(row._id);
+            loadReports();
+        } catch (error) {
+            setReportError(error.message);
+        }
+    };
+
+    const branchNameFor = (branchId) => (branches.find((branch) => String(branch._id) === String(branchId)) || {}).branchName || '';
+    // Rows saved before branch support have no branch and only belong to the
+    // "All branches" view, so they show a dash instead of a branch name.
+    const branchLabelFor = (branchId) => branchNameFor(branchId) || '—';
+    const activeBranches = branches.filter((branch) => branch.status === 'active');
+    const selectedBranch = selectedBranchId === 'ALL' ? null : branches.find((branch) => String(branch._id) === String(selectedBranchId)) || null;
+    const branchScope = selectedBranch ? selectedBranch.branchName : 'all branches';
+    // The branch travels into the export heading (and file name) so a filtered
+    // report can never be mistaken for the all-branches one.
+    const reportExportTitle = selectedBranch ? `Overall Business Report - ${selectedBranch.branchName}` : 'Overall Business Report';
+
+    // Balance and profit-or-loss are derived from income - expenses.
+    const reportRows = reports.map((report) => {
+        const balance = Number(report.income || 0) - Number(report.expenses || 0);
+        return { ...report, branchLabel: branchLabelFor(report.branchId), balance, profitLoss: balance >= 0 ? 'Profit' : 'Loss' };
+    });
+
+    const reportColumns = [
+        { key: 'month', label: 'Month', render: (row) => formatMonthLabel(row.month), exportValue: (row) => formatMonthLabel(row.month) },
+        { key: 'branch', label: 'Branch', render: (row) => row.branchLabel, exportValue: (row) => row.branchLabel },
+        { key: 'clientsCount', label: 'No. of Admissions', render: (row) => String(row.clientsCount ?? 0), exportValue: (row) => String(row.clientsCount ?? 0) },
+        { key: 'income', label: 'Income', render: (row) => money(row.income), exportValue: (row) => money(row.income) },
+        { key: 'expenses', label: 'Expenses', render: (row) => money(row.expenses), exportValue: (row) => money(row.expenses) },
+        { key: 'balance', label: 'Balance', render: (row) => signedMoney(row.balance), exportValue: (row) => signedMoney(row.balance) },
+        { key: 'profitLoss', label: 'Profit or Loss', render: (row) => <span className={`profit-loss ${row.profitLoss === 'Profit' ? 'profit' : 'loss'}`}>{row.profitLoss}</span>, exportValue: (row) => row.profitLoss }
+    ];
+
+    const planPending = businessUser && hasBusinessPlan === null;
+    const showOverallReport = businessUser && hasBusinessPlan === true;
+    return <div className="resource-page">
+        <p className="eyebrow">Insights</p>
+        <h1>Analytics</h1>
+        <p className="subheading">A clear view of your money flow{businessUser && selectedBranch ? ` for ${selectedBranch.branchName}` : ''}.</p>
+        <div className="summary-grid analytics-cards">
+            <div className="summary-card income"><span>Income</span><strong className="summary-value">{money(income)}</strong></div>
+            <div className="summary-card expense"><span>Expenses</span><strong className="summary-value">{money(expense)}</strong></div>
+            <div className="summary-card balance"><span>Net cash flow</span><strong className="summary-value">{money(income - expense)}</strong></div>
+        </div>
+        {planPending ? null : showOverallReport ? (
+            <section className="panel insight-panel">
+                <div className="panel-head">
+                    <div>
+                        <h2>Overall Report</h2>
+                        <p className="subheading">Month-wise business performance for {branchScope}, ready to export.</p>
+                    </div>
+                    <div className="txn-table-tools">
+                        <span className="export-label">Export as</span>
+                        {['xl', 'word', 'pdf'].map((format) => <button type="button" key={format} onClick={() => exportRef.current?.(format)}>{format === 'xl' ? 'XL' : format[0].toUpperCase() + format.slice(1)}</button>)}
+                    </div>
+                </div>
+                {reportError && <div className="error-banner">{reportError}</div>}
+                {reportMessage && <div className="success-banner">{reportMessage}</div>}
+                {canManageReports && <form className="inline-form" onSubmit={saveReport}>
+                    <input type="month" value={reportForm.month} onChange={setReportField('month')} required aria-label="Month" />
+                    <select value={reportForm.branchId} onChange={setReportField('branchId')} required aria-label="Branch">
+                        <option value="" disabled>Select branch</option>
+                        {activeBranches.map((branch) => <option key={branch._id} value={branch._id}>{branch.branchName}</option>)}
+                    </select>
+                    <input type="number" min="0" step="1" placeholder="No. of Admissions" value={reportForm.clientsCount} onChange={setReportField('clientsCount')} required aria-label="No. of Business/Clients" />
+                    <input type="number" min="0" step="0.01" placeholder="Income" value={reportForm.income} onChange={setReportField('income')} required aria-label="Income" />
+                    <input type="number" min="0" step="0.01" placeholder="Expenses" value={reportForm.expenses} onChange={setReportField('expenses')} required aria-label="Expenses" />
+                    <button className="primary-button" type="submit">{editing ? 'Update' : 'Add'}</button>
+                    {editing && <button type="button" className="icon-button" title="Cancel edit" onClick={cancelEdit}>×</button>}
+                </form>}
+                <DataTable
+                    columns={reportColumns}
+                    rows={reportRows}
+                    exportTitle={reportExportTitle}
+                    onExportReady={exportRef}
+                    onEdit={canManageReports ? editReport : undefined}
+                    onDelete={canManageReports ? removeReport : undefined}
+                />
+            </section>
+        ) : (
+            <section className="panel insight-panel"><h2>Transaction mix</h2><div className="bar-track"><span className="income-bar" style={{ width: `${income + expense ? income / (income + expense) * 100 : 0}%` }} /></div><p className="subheading">Income versus expenses across your recorded transactions.</p></section>
+        )}
+    </div>;
 }
 
 export function BudgetsPage() {

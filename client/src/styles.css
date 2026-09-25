@@ -1236,6 +1236,12 @@ nav {
     flex: 1;
 }
 
+/* Branch picker in the Analytics Overall Report form: wide enough for a
+   readable branch name without pushing the number inputs out. */
+.inline-form select {
+    min-width: 158px;
+}
+
 .error-banner {
     padding: 12px;
     margin: -15px 0 15px;
@@ -1565,6 +1571,29 @@ nav {
 .txn-table-tools button:hover {
     background: var(--mint);
     color: var(--green);
+}
+
+/* Analytics "Overall Report" panel (business plan logins) */
+.panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.panel-head .subheading {
+    margin-top: 4px;
+}
+
+.profit-loss.profit {
+    color: #1b6942;
+    font-weight: 700;
+}
+
+.profit-loss.loss {
+    color: #b4442c;
+    font-weight: 700;
 }
 
 /* Totals row in the transactions data table */
