@@ -1,4 +1,6 @@
 import Branch from '../models/Branch.js';
+import Subscription from '../models/Subscription.js';
+import User from '../models/User.js';
 
 export function isBusinessUser(user) {
     return !!user && ['business_owner', 'business_staff'].includes(user.role);
@@ -17,6 +19,23 @@ export function requireBusinessOwner(req, res, next) {
     if (!isBusinessUser(req.user)) return res.status(403).json({ message: 'Business account access required' });
     if (req.user.role !== 'business_owner') return res.status(403).json({ message: 'Only a business owner can update the PDF template' });
     next();
+}
+
+// Business-plan-only features (e.g. the Analytics overall report) need an
+// ACTIVE business subscription on the owner's account - a business role alone
+// is not enough, so expired/personal plans are rejected here.
+export async function requireBusinessPlan(req, res, next) {
+    try {
+        if (!isBusinessUser(req.user)) return res.status(403).json({ message: 'Business account access required' });
+        const owner = await User.findById(ownerIdFor(req.user)).select('subscriptionPlan');
+        const plan = owner?.subscriptionPlan
+            ? await Subscription.findOne({ planName: owner.subscriptionPlan, planType: 'business', status: 'active' })
+            : null;
+        if (!plan) return res.status(403).json({ message: 'An active business subscription plan is required for this feature' });
+        next();
+    } catch (error) {
+        next(error);
+    }
 }
 
 // Transactions are a core personal feature as well: personal users and super

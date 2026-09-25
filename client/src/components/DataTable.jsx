@@ -105,7 +105,28 @@ export function getTransactionReportTitle(dateFilter = 'all', typeFilter = 'All'
     }
 }
 
-function createPdf(rows, rawTitle = 'Transactions', branding = null) {
+// Numbers (optionally signed, currency formatted or a percentage) are right
+// aligned in tables and exports; everything else stays left aligned.
+const NUMERIC_TEXT = /^[+-]?\s*[₹$€£]?\s*\d[\d,]*(\.\d+)?%?$/;
+function isNumericText(value) {
+    return NUMERIC_TEXT.test(String(value ?? '').trim());
+}
+
+// Split the printable width over columns using each column's label and value
+// lengths as weights (min 50pt per column) so a custom table still fits.
+function distributeColumnWidths(labels, rows, total) {
+    const weights = labels.map((label, index) => {
+        const longestValue = rows.reduce((max, row) => Math.max(max, String(row?.[index] ?? '').length), 0);
+        return Math.max(String(label).length, Math.min(longestValue, 20), 6);
+    });
+    const weightTotal = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+    const widths = weights.map((weight) => Math.max(50, Math.round((weight / weightTotal) * total)));
+    // Push the rounding remainder into the last column so widths add up exactly.
+    widths[widths.length - 1] += total - widths.reduce((sum, width) => sum + width, 0);
+    return widths;
+}
+
+function createPdf(rows, rawTitle = 'Transactions', branding = null, labels = null) {
     const title = String(rawTitle || 'Transactions');
     // Neat business header: logo (left, width set by the owner as a % of the
     // page) + business name + address flush to the right end, only when the
@@ -133,14 +154,12 @@ function createPdf(rows, rawTitle = 'Transactions', branding = null) {
         ? Math.min(25, requestedLogoWidth)
         : 8;
 
-    // Same order as XL / Word / UI table
-    const headers = [
-        'Type',
-        'Category',
-        'Date',
-        'Description',
-        'Amount'
-    ];
+    // Same order as XL / Word / UI table. Custom tables (e.g. the business
+    // Overall Report) pass their own column labels instead.
+    const headers = (Array.isArray(labels) && labels.length)
+        ? labels.map((label) => String(label))
+        : ['Type', 'Category', 'Date', 'Description', 'Amount'];
+    const isCustomTable = (Array.isArray(labels) && labels.length > 0);
 
     const pageWidth = 612;
     const pageHeight = 792;
@@ -149,14 +168,17 @@ function createPdf(rows, rawTitle = 'Transactions', branding = null) {
     const tableRight = 576;
     const tableWidth = tableRight - tableLeft;
 
-    // Total = 540
-    const columnWidths = [
-        80,   // Type
-        110,  // Category
-        100,  // Date
-        160,  // Description
-        90    // Amount
-    ];
+    // Total = 540 for the transactions table; custom tables split the same
+    // width in proportion to their labels and values.
+    const columnWidths = isCustomTable
+        ? distributeColumnWidths(headers, rows, tableWidth)
+        : [
+            80,   // Type
+            110,  // Category
+            100,  // Date
+            160,  // Description
+            90    // Amount
+        ];
 
     const columnX = [];
     let currentX = tableLeft;
@@ -353,31 +375,17 @@ function createPdf(rows, rawTitle = 'Transactions', branding = null) {
 
                 let text = String(value ?? '');
 
-                // Maximum text length based on column
-                if (columnIndex === 0) {
-                    text = text.slice(0, 14);
-                }
-
-                if (columnIndex === 1) {
-                    text = text.slice(0, 18);
-                }
-
-                if (columnIndex === 2) {
-                    text = text.slice(0, 16);
-                }
-
-                if (columnIndex === 3) {
-                    text = text.slice(0, 28);
-                }
-
-                if (columnIndex === 4) {
-                    text = text.slice(0, 16);
-                }
+                // Truncate to whatever fits inside the column.
+                const maxChars = Math.max(
+                    4,
+                    Math.floor((columnWidths[columnIndex] - 12) / 5.2)
+                );
+                text = text.slice(0, maxChars);
 
                 // -----------------------------
-                // Amount = Right aligned
+                // Numbers (amounts, counts) = Right aligned
                 // -----------------------------
-                if (columnIndex === 4) {
+                if (isNumericText(text)) {
 
                     const estimatedTextWidth =
                         text.length * 5.2;
@@ -556,8 +564,10 @@ endstream`
 
     return pdf;
 }
-export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 8, dateFilter = 'all', typeFilter = 'All', onExportReady, showTotal = false }) {
+export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 8, dateFilter = 'all', typeFilter = 'All', onExportReady, showTotal = false, exportTitle = '' }) {
     const [page, setPage] = useState(1);
+    // Read-only tables (no handlers) skip the Actions column entirely.
+    const showActions = Boolean(onEdit || onDelete);
     useEffect(() => { setPage(1); }, [dateFilter, typeFilter, rows]);
     const isTransactionsTable = columns.some((column) => column.key === 'category') && columns.some((column) => column.key === 'type');
     const filteredRows = isTransactionsTable ? rows.filter((row) => {
@@ -583,11 +593,27 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
         return sum + (isExpense ? -value : value);
     }, 0) : 0;
     const exportRows = async (format) => {
-        const reportTitle = isTransactionsTable ? getTransactionReportTitle(dateFilter, typeFilter) : 'Transactions Report';
+        const reportTitle = exportTitle || (isTransactionsTable ? getTransactionReportTitle(dateFilter, typeFilter) : 'Transactions Report');
         const fileBase = reportTitle.replace(/[\\/:*?"<>|]/g, '').trim() || 'Transactions Report';
-        const data = filteredRows.map((row) => [row.type, row.category, new Date(row.date).toLocaleDateString('en-IN'), row.description || row.title || '', Number(row.amount || 0).toFixed(2)]);
+        const data = isTransactionsTable
+            ? filteredRows.map((row) => [row.type, row.category, new Date(row.date).toLocaleDateString('en-IN'), row.description || row.title || '', Number(row.amount || 0).toFixed(2)])
+            : filteredRows.map((row) => columns.map((column) => String(column.exportValue ? column.exportValue(row) : (row[column.key] ?? ''))));
         if (isTransactionsTable) data.push(['', '', '', 'Total', (totalAmount >= 0 ? '+' : '') + totalAmount.toFixed(2)]);
         const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        // Transactions keep their fixed column styling; custom tables right-align
+        // numeric cells (income, expenses, balance) and leave text left.
+        const exportHeaders = isTransactionsTable
+            ? ['Type', 'Category', 'Date', 'Description', 'Amount']
+            : columns.map((column) => column.label);
+        const cellStyleFor = (value, index) => {
+            if (isTransactionsTable) {
+                if (index === 2) return 'mso-number-format:\\@;width:100px;';
+                if (index === 3) return 'width:180px;';
+                if (index === 4) return 'width:90px;text-align:right;';
+                return '';
+            }
+            return isNumericText(value) ? 'text-align:right;' : '';
+        };
         const table = `
 <table
     border="1"
@@ -600,13 +626,7 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
 >
     <thead>
         <tr>
-            ${[
-                'Type',
-                'Category',
-                'Date',
-                'Description',
-                'Amount'
-            ].map((header) => `
+            ${exportHeaders.map((header) => `
                 <th style="
                     background:#e3f2eb;
                     padding:6px;
@@ -622,21 +642,7 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
         ${data.map((row) => `
             <tr>
                 ${row.map((value, index) => `
-                    <td style="
-                        padding:6px;
-                        ${index === 2
-                    ? 'mso-number-format:\\@;width:100px;'
-                    : ''
-                }
-                        ${index === 3
-                    ? 'width:180px;'
-                    : ''
-                }
-                        ${index === 4
-                    ? 'width:90px;text-align:right;'
-                    : ''
-                }
-                    ">
+                    <td style="padding:6px;${cellStyleFor(value, index)}">
                         ${escapeHtml(value)}
                     </td>
                 `).join('')}
@@ -656,11 +662,14 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
             type = 'application/msword';
             extension = 'doc';
         } else {
-            // PDF only: business subscription plan users get the neat
-            // logo + address letterhead from the owner's PDF template
-            // (owner and staff share it); personal users get plain PDF.
-            const branding = isTransactionsTable ? await getBusinessBranding() : null;
-            const pdfString = createPdf(data, reportTitle, branding);
+            // PDF only: every export gets the neat logo + address letterhead
+            // from the owner's PDF template (owner and staff share it) when the
+            // account holds an active business plan. That includes custom
+            // tables such as the business Overall Report, so its PDF carries
+            // the same header section as the transactions report; personal
+            // users (and unbranded businesses) get a plain PDF.
+            const branding = await getBusinessBranding();
+            const pdfString = createPdf(data, reportTitle, branding, isTransactionsTable ? null : columns.map((column) => column.label));
             const bytes = new Uint8Array(pdfString.length);
             for (let i = 0; i < pdfString.length; i++) bytes[i] = pdfString.charCodeAt(i) & 0xFF;
             const blob = new Blob([bytes], { type: 'application/pdf' });
@@ -682,5 +691,5 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
     };
     const totalRow = (showTotal && isTransactionsTable) ? <tr className="total-row"><td></td><td></td><td></td><td><strong>Total</strong></td><td className={`total-amount ${totalAmount >= 0 ? 'income' : 'expense'}`}>{totalAmount >= 0 ? '+' : '-'}{'₹' + Math.abs(totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td></td></tr> : null;
     if (onExportReady) onExportReady.current = exportRows;
-    return <><div className="data-table-tools" /><div className="data-table-wrap"><table className="data-table"><thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Actions</th></tr></thead><tbody>{current.map((row) => <tr key={row._id || row.id}>{columns.map((column) => <td key={column.key}>{column.render ? column.render(row) : row[column.key] || '-'}</td>)}<td className="table-actions"><button className="table-icon" onClick={() => onEdit?.(row)} aria-label="Edit"><Pencil size={15} /></button><button className="table-icon delete" onClick={() => onDelete?.(row)} aria-label="Delete"><Trash2 size={15} /></button></td></tr>)}{totalRow}</tbody></table>{!current.length && <div className="empty-state">No records found.</div>}</div><div className="pagination"><span>Showing {current.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length}</span><div><button className="table-icon" disabled={page === 1} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button><button className="table-icon" disabled={page === pages} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button></div></div></>;
+    return <><div className="data-table-tools" /><div className="data-table-wrap"><table className="data-table"><thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}{showActions && <th>Actions</th>}</tr></thead><tbody>{current.map((row) => <tr key={row._id || row.id}>{columns.map((column) => <td key={column.key}>{column.render ? column.render(row) : row[column.key] || '-'}</td>)}{showActions && <td className="table-actions"><button className="table-icon" onClick={() => onEdit?.(row)} aria-label="Edit"><Pencil size={15} /></button><button className="table-icon delete" onClick={() => onDelete?.(row)} aria-label="Delete"><Trash2 size={15} /></button></td>}</tr>)}{totalRow}</tbody></table>{!current.length && <div className="empty-state">No records found.</div>}</div><div className="pagination"><span>Showing {current.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length}</span><div><button className="table-icon" disabled={page === 1} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button><button className="table-icon" disabled={page === pages} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button></div></div></>;
 }
