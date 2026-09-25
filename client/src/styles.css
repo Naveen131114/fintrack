@@ -1596,10 +1596,13 @@ nav {
     font-weight: 700;
 }
 
-/* Totals row in the transactions data table */
+/* Totals row shared by the transactions table and the Analytics
+   "Overall Report" table (bottom summary row). */
 .data-table .total-row td {
     border-top: 2px solid var(--line);
     padding-top: 12px;
+    color: var(--ink);
+    font-weight: 700;
 }
 .data-table .total-amount {
     font: 700 13px 'Manrope', sans-serif;
@@ -1610,4 +1613,80 @@ nav {
 }
 .data-table .total-amount.expense {
     color: var(--coral);
+}
+
+/* "Keep Notes" page (sidebar -> Keep Notes): free-text scratchpad panel.
+   The note is per-user and stays until it is cleared, so the editor gets the
+   full panel width and a resizable text area. */
+.keep-notes-panel {
+    display: grid;
+    gap: 14px;
+}
+
+.keep-notes-panel h2 {
+    margin-bottom: 2px;
+}
+
+.keep-notes-input {
+    width: 100%;
+    min-height: 260px;
+    resize: vertical;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--input);
+    color: var(--ink);
+    font: 400 13px 'DM Sans', sans-serif;
+    line-height: 1.7;
+    outline: none;
+}
+
+.keep-notes-input::placeholder {
+    color: var(--muted);
+}
+
+.keep-notes-input:focus {
+    border-color: var(--green);
+    box-shadow: 0 0 0 3px rgba(40, 124, 99, .1);
+}
+
+.keep-notes-input:disabled {
+    opacity: .7;
+    cursor: not-allowed;
+}
+
+.keep-notes-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.keep-notes-meta {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.keep-notes-actions {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+}
+
+.keep-notes-actions button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+@media (max-width: 680px) {
+    .keep-notes-actions {
+        width: 100%;
+    }
+
+    .keep-notes-actions button {
+        flex: 1;
+        justify-content: center;
+    }
 }

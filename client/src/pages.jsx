@@ -243,4 +243,90 @@ export const BankAccountsPage = () => <ResourcePage title="Bank Accounts" descri
 export const UpiAccountsPage = () => <ResourcePage title="UPI Accounts" description="Manage UPI IDs and QR-code URLs." resource={api.business.upiAccounts} columns={[{ key: 'upiId', label: 'UPI ID' }, { key: 'upiPhoneNumber', label: 'Phone' }, { key: 'status', label: 'Status' }]} fields={[{ key: 'upiId', label: 'UPI ID' }, { key: 'upiPhoneNumber', label: 'Phone number', required: false }, { key: 'qrCode', label: 'QR code URL', required: false }, { key: 'status', label: 'Status', options: ['active', 'inactive'] }]} />;
 export function ActivityLogsPage() { const [rows, setRows] = useState([]); const [error, setError] = useState(''); useEffect(() => { if (!isBusinessUser(getStoredUser())) { setError('Business account access required'); return; } api.business.activityLogs().then(setRows).catch((err) => setError(err.message)); }, []); return <div className="resource-page"><div className="resource-heading"><div><p className="eyebrow">Audit trail</p><h1>Activity Logs</h1><p className="subheading">Important actions performed by your staff.</p></div></div>{error && <div className="error-banner">{error}</div>}<section className="panel resource-panel"><DataTable columns={[{ key: 'createdAt', label: 'Time', render: (row) => new Date(row.createdAt).toLocaleString() }, { key: 'staffUserId', label: 'Staff', render: (row) => row.staffUserId?.name || row.staffUserId?.userName || 'Staff' }, { key: 'action', label: 'Action' }, { key: 'module', label: 'Module' }, { key: 'description', label: 'Details' }]} rows={rows} /></section></div>; }
 
+// "Keep Notes" is a free-text scratchpad available to every signed-in user.
+// The note is stored per user and stays until it is cleared; it never takes
+// part in transaction, budget or report calculations.
+export function KeepNotesPage() {
+    const [content, setContent] = useState('');
+    const [savedContent, setSavedContent] = useState('');
+    const [updatedAt, setUpdatedAt] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [message, setMessage] = useState('');
+    const [clearAlertOpen, setClearAlertOpen] = useState(false);
+
+    useEffect(() => {
+        setLoading(true);
+        api.notes.get()
+            .then((note) => {
+                const saved = note?.content || '';
+                setContent(saved);
+                setSavedContent(saved);
+                setUpdatedAt(note?.updatedAt || null);
+            })
+            .catch((error) => setMessage(error.message))
+            .finally(() => setLoading(false));
+    }, []);
+
+    const dirty = content !== savedContent;
+
+    const saveNote = async () => {
+        // Keep the typed value as the source of truth: saving never rewrites the
+        // textarea, so text written while the request is in flight is not lost.
+        const payload = content;
+        try {
+            setSaving(true);
+            const note = await api.notes.save(payload);
+            setSavedContent(payload);
+            setUpdatedAt(note?.updatedAt || new Date().toISOString());
+            setMessage('Notes saved');
+            setTimeout(() => setMessage(''), 3000);
+        } catch (error) {
+            setMessage(error.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const clearNote = async () => {
+        try {
+            setSaving(true);
+            await api.notes.clear();
+            setContent('');
+            setSavedContent('');
+            setUpdatedAt(null);
+            setMessage('Notes cleared');
+            setTimeout(() => setMessage(''), 3000);
+        } catch (error) {
+            setMessage(error.message);
+        } finally {
+            setSaving(false);
+            setClearAlertOpen(false);
+        }
+    };
+
+    const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
+
+    return <div className="resource-page">
+        <div className="resource-heading">
+            <div><p className="eyebrow">Scratchpad</p><h1>Keep Notes</h1><p className="subheading">Write down anything you want to remember. Your notes stay here until you clear them.</p></div>
+        </div>
+        {message && <div className="success-banner">{message}</div>}
+        <section className="panel keep-notes-panel">
+            <h2>My notes</h2>
+            <textarea className="keep-notes-input" value={content} onChange={(event) => setContent(event.target.value)} placeholder="Reminders, follow-ups, or anything worth keeping…" rows={14} maxLength={20000} disabled={loading} aria-label="My notes" />
+            <div className="keep-notes-footer">
+                <span className="keep-notes-meta">
+                    {loading ? 'Loading your notes…' : `${wordCount} ${wordCount === 1 ? 'word' : 'words'} · ${content.length}/20000 characters${updatedAt ? ` · Last saved ${new Date(updatedAt).toLocaleString()}` : ''}${dirty ? ' · Unsaved changes' : ''}`}
+                </span>
+                <div className="keep-notes-actions">
+                    <button className="secondary-button" type="button" onClick={() => setClearAlertOpen(true)} disabled={loading || saving || (!content && !savedContent)}>Clear</button>
+                    <button className="primary-button" type="button" onClick={saveNote} disabled={loading || saving || !dirty}>{saving ? 'Saving…' : 'Save notes'}</button>
+                </div>
+            </div>
+        </section>
+        <AlertDialog open={clearAlertOpen} variant="destructive" title="Clear notes?" message="Your saved notes will be removed permanently. This cannot be undone." confirmText="Clear notes" onConfirm={clearNote} onCancel={() => setClearAlertOpen(false)} />
+    </div>;
+}
+
 export { StaffPage };

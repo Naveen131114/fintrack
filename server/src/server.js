@@ -14,6 +14,7 @@ import authRoutes from './routes/authRoutes.js';
 import { authenticateToken } from './middleware/authMiddleware.js';
 import budgetRoutes from './routes/budgetRoutes.js';
 import targetRoutes from './routes/targetRoutes.js';
+import noteRoutes from './routes/noteRoutes.js';
 import monthlyReportRoutes from './routes/monthlyReportRoutes.js';
 import MonthlyReport from './models/MonthlyReport.js';
 import businessRoutes from './routes/businessRoutes.js';
@@ -27,6 +28,8 @@ app.use('/api/transactions', authenticateToken, transactionRoutes);
 app.use('/api/masters', authenticateToken, masterRoutes);
 app.use('/api/budgets', authenticateToken, budgetRoutes);
 app.use('/api/targets', authenticateToken, targetRoutes);
+// Personal "Keep Notes" scratchpad - available to every signed-in role.
+app.use('/api/notes', authenticateToken, noteRoutes);
 app.use('/api/reports', authenticateToken, monthlyReportRoutes);
 app.use('/api/business', authenticateToken, businessRoutes);
 app.use('/api/users', authenticateToken, resourceRoutes(User, { superAdmin: true, middleware: requireSuperAdmin, isUserModel: true }));

@@ -1,15 +1,18 @@
-import { BarChart3, Building2, Landmark, LayoutDashboard, LogOut, PieChart, QrCode, ScrollText, Settings, Tags, Users, WalletCards, X } from 'lucide-react';
+import { BarChart3, Building2, Landmark, LayoutDashboard, LogOut, PieChart, QrCode, ScrollText, Settings, StickyNote, Tags, Users, WalletCards, X } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { getStoredUser, isBusinessStaff, isBusinessUser as checkIsBusinessUser, isSuperAdmin as checkIsSuperAdmin, roleLabel } from '../utils/roles';
 
+// Rendered for every signed-in user (personal, business owner, business staff
+// and super admin) - Keep Notes is a personal scratchpad, not a business feature.
 const links = [
     { label: 'Overview', icon: LayoutDashboard, to: '/' },
     { label: 'Masters', icon: Tags, to: '/masters' },
     { label: 'Transactions', icon: WalletCards, to: '/transactions' },
     { label: 'Analytics', icon: BarChart3, to: '/analytics' },
     { label: 'Budgets', icon: PieChart, to: '/budgets' },
-    { label: 'Target', icon: WalletCards, to: '/targets' }
+    { label: 'Target', icon: WalletCards, to: '/targets' },
+    { label: 'Keep Notes', icon: StickyNote, to: '/keep-notes' }
 ];
 
 export function Sidebar({ mobileMenuOpen = false, onCloseMobileMenu = () => { } }) {

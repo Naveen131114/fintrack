@@ -12,6 +12,7 @@ const pageNames = {
     '/analytics': 'Analytics',
     '/budgets': 'Budgets',
     '/targets': 'Target',
+    '/keep-notes': 'Keep Notes',
     '/branches': 'Branches',
     '/bank-accounts': 'Bank Accounts',
     '/upi-accounts': 'UPI Accounts',

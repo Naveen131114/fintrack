@@ -188,6 +188,37 @@ export function AnalyticsPage() {
         return { ...report, branchLabel: branchLabelFor(report.branchId), balance, profitLoss: balance >= 0 ? 'Profit' : 'Loss' };
     });
 
+    // Totals row (last row of the Overall Report table): admissions count up,
+    // and income / expenses / balance are summed across the months listed, so
+    // the row always matches the branch filter above.
+    const reportTotals = reportRows.reduce((totals, row) => ({
+        clientsCount: totals.clientsCount + Number(row.clientsCount || 0),
+        income: totals.income + Number(row.income || 0),
+        expenses: totals.expenses + Number(row.expenses || 0),
+        balance: totals.balance + Number(row.balance || 0)
+    }), { clientsCount: 0, income: 0, expenses: 0, balance: 0 });
+    const reportSummary = {
+        labelKey: 'month',
+        label: 'Total',
+        // Each column keeps its own formatting (money / signed money / profit or loss).
+        values: {
+            clientsCount: String(reportTotals.clientsCount),
+            income: money(reportTotals.income),
+            expenses: money(reportTotals.expenses),
+            balance: signedMoney(reportTotals.balance),
+            profitLoss: <span className={`profit-loss ${reportTotals.balance >= 0 ? 'profit' : 'loss'}`}>{reportTotals.balance >= 0 ? 'Profit' : 'Loss'}</span>
+        },
+        // Plain-text twin of the same row for the XL / Word / PDF exports.
+        exportValues: {
+            month: 'Total',
+            clientsCount: String(reportTotals.clientsCount),
+            income: money(reportTotals.income),
+            expenses: money(reportTotals.expenses),
+            balance: signedMoney(reportTotals.balance),
+            profitLoss: reportTotals.balance >= 0 ? 'Profit' : 'Loss'
+        }
+    };
+
     const reportColumns = [
         { key: 'month', label: 'Month', render: (row) => formatMonthLabel(row.month), exportValue: (row) => formatMonthLabel(row.month) },
         { key: 'branch', label: 'Branch', render: (row) => row.branchLabel, exportValue: (row) => row.branchLabel },
@@ -238,6 +269,7 @@ export function AnalyticsPage() {
                 <DataTable
                     columns={reportColumns}
                     rows={reportRows}
+                    summary={reportSummary}
                     exportTitle={reportExportTitle}
                     onExportReady={exportRef}
                     onEdit={canManageReports ? editReport : undefined}

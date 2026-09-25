@@ -564,7 +564,7 @@ endstream`
 
     return pdf;
 }
-export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 8, dateFilter = 'all', typeFilter = 'All', onExportReady, showTotal = false, exportTitle = '' }) {
+export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 8, dateFilter = 'all', typeFilter = 'All', onExportReady, showTotal = false, exportTitle = '', summary = null }) {
     const [page, setPage] = useState(1);
     // Read-only tables (no handlers) skip the Actions column entirely.
     const showActions = Boolean(onEdit || onDelete);
@@ -599,6 +599,11 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
             ? filteredRows.map((row) => [row.type, row.category, new Date(row.date).toLocaleDateString('en-IN'), row.description || row.title || '', Number(row.amount || 0).toFixed(2)])
             : filteredRows.map((row) => columns.map((column) => String(column.exportValue ? column.exportValue(row) : (row[column.key] ?? ''))));
         if (isTransactionsTable) data.push(['', '', '', 'Total', (totalAmount >= 0 ? '+' : '') + totalAmount.toFixed(2)]);
+        // Custom tables (e.g. the Analytics Overall Report) append their own
+        // totals row to the export, so XL / Word / PDF match the on-screen table.
+        const exportSummaryIndex = (summary?.exportValues && !isTransactionsTable && data.length)
+            ? data.push(columns.map((column) => String(summary.exportValues[column.key] ?? ''))) - 1
+            : -1;
         const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         // Transactions keep their fixed column styling; custom tables right-align
         // numeric cells (income, expenses, balance) and leave text left.
@@ -639,8 +644,8 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
     </thead>
 
     <tbody>
-        ${data.map((row) => `
-            <tr>
+        ${data.map((row, rowIndex) => `
+            <tr${rowIndex === exportSummaryIndex ? ' style="font-weight:700;background:#f2f7f4;"' : ''}>
                 ${row.map((value, index) => `
                     <td style="padding:6px;${cellStyleFor(value, index)}">
                         ${escapeHtml(value)}
@@ -689,7 +694,12 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
         link.click();
         URL.revokeObjectURL(url);
     };
+    // Optional totals row for custom tables (e.g. the Analytics Overall Report).
+    // The caller names the column carrying the label (`labelKey`) and supplies
+    // one value per column key; the row renders under the page rows - so it
+    // stays visible on every page - and hides while the table has no records.
+    const summaryRow = (summary && filteredRows.length) ? <tr className="total-row">{columns.map((column) => <td key={column.key}>{column.key === summary.labelKey ? <strong>{summary.label || 'Total'}</strong> : (summary.values?.[column.key] ?? '')}</td>)}{showActions && <td />}</tr> : null;
     const totalRow = (showTotal && isTransactionsTable) ? <tr className="total-row"><td></td><td></td><td></td><td><strong>Total</strong></td><td className={`total-amount ${totalAmount >= 0 ? 'income' : 'expense'}`}>{totalAmount >= 0 ? '+' : '-'}{'₹' + Math.abs(totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td></td></tr> : null;
     if (onExportReady) onExportReady.current = exportRows;
-    return <><div className="data-table-tools" /><div className="data-table-wrap"><table className="data-table"><thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}{showActions && <th>Actions</th>}</tr></thead><tbody>{current.map((row) => <tr key={row._id || row.id}>{columns.map((column) => <td key={column.key}>{column.render ? column.render(row) : row[column.key] || '-'}</td>)}{showActions && <td className="table-actions"><button className="table-icon" onClick={() => onEdit?.(row)} aria-label="Edit"><Pencil size={15} /></button><button className="table-icon delete" onClick={() => onDelete?.(row)} aria-label="Delete"><Trash2 size={15} /></button></td>}</tr>)}{totalRow}</tbody></table>{!current.length && <div className="empty-state">No records found.</div>}</div><div className="pagination"><span>Showing {current.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length}</span><div><button className="table-icon" disabled={page === 1} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button><button className="table-icon" disabled={page === pages} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button></div></div></>;
+    return <><div className="data-table-tools" /><div className="data-table-wrap"><table className="data-table"><thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}{showActions && <th>Actions</th>}</tr></thead><tbody>{current.map((row) => <tr key={row._id || row.id}>{columns.map((column) => <td key={column.key}>{column.render ? column.render(row) : row[column.key] || '-'}</td>)}{showActions && <td className="table-actions"><button className="table-icon" onClick={() => onEdit?.(row)} aria-label="Edit"><Pencil size={15} /></button><button className="table-icon delete" onClick={() => onDelete?.(row)} aria-label="Delete"><Trash2 size={15} /></button></td>}</tr>)}{summaryRow}{totalRow}</tbody></table>{!current.length && <div className="empty-state">No records found.</div>}</div><div className="pagination"><span>Showing {current.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length}</span><div><button className="table-icon" disabled={page === 1} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button><button className="table-icon" disabled={page === pages} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button></div></div></>;
 }

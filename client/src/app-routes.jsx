@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import App from './App';
-import { MastersPage, StaffPage, SubscriptionsPage, TransactionsPage, UsersPage, BranchesPage, BankAccountsPage, UpiAccountsPage, ActivityLogsPage } from './pages';
+import { ActivityLogsPage, BankAccountsPage, BranchesPage, KeepNotesPage, MastersPage, StaffPage, SubscriptionsPage, TransactionsPage, UpiAccountsPage, UsersPage } from './pages';
 import { Sidebar } from './components/Sidebar';
 import TopNavbar from './components/TopNavbar';
 import { AnalyticsPage, BudgetsPage, LoginPage, PlansPage, TargetPage } from './publicPages';
@@ -66,6 +66,8 @@ export default function AppRoutes() {
         <Route path="/analytics" element={isAuthenticated ? <PageLayout><AnalyticsPage /></PageLayout> : <Navigate to="/login" replace />} />
         <Route path="/budgets" element={isAuthenticated ? <PageLayout><BudgetsPage /></PageLayout> : <Navigate to="/login" replace />} />
         <Route path="/targets" element={isAuthenticated ? <PageLayout><TargetPage /></PageLayout> : <Navigate to="/login" replace />} />
+        {/* Personal scratchpad - no BusinessGuard, so it is available to every role. */}
+        <Route path="/keep-notes" element={isAuthenticated ? <PageLayout><KeepNotesPage /></PageLayout> : <Navigate to="/login" replace />} />
         <Route path="/branches" element={isAuthenticated ? <PageLayout><BusinessGuard><BranchesPage /></BusinessGuard></PageLayout> : <Navigate to="/login" replace />} />
         <Route path="/bank-accounts" element={isAuthenticated ? <PageLayout><BusinessGuard><BankAccountsPage /></BusinessGuard></PageLayout> : <Navigate to="/login" replace />} />
         <Route path="/upi-accounts" element={isAuthenticated ? <PageLayout><BusinessGuard><UpiAccountsPage /></BusinessGuard></PageLayout> : <Navigate to="/login" replace />} />
