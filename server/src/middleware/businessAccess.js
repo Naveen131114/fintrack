@@ -67,8 +67,24 @@ export async function assertBranchAccess(user, branchId) {
 
 export function branchFilter(user, branchId) {
     const filter = { businessOwnerId: ownerIdFor(user) };
-    if (branchId && branchId !== 'ALL') filter.branchId = branchId;
-    if (user.role === 'business_staff') filter.branchId = { $in: user.allowedBranches || [] };
+    if (user.role === 'business_staff') {
+        const allowed = user.allowedBranches || [];
+        if (branchId && branchId !== 'ALL') {
+            // Respect the selected branch, but only if the staff member is
+            // actually allowed to access it; otherwise return no results.
+            if (allowed.some((id) => String(id) === String(branchId))) {
+                filter.branchId = branchId;
+            } else {
+                filter.branchId = { $in: [] };
+            }
+        } else {
+            // "ALL" or no branch → show only the staff's assigned branches
+            filter.branchId = { $in: allowed };
+        }
+    } else {
+        // business_owner: honour the requested branch (or all when "ALL"/empty)
+        if (branchId && branchId !== 'ALL') filter.branchId = branchId;
+    }
     return filter;
 }
 

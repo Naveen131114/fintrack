@@ -129,7 +129,8 @@ export function TransactionsPage() {
     const [deleteAlert, setDeleteAlert] = useState(null);
     const [dateFilter, setDateFilter] = useState('this-month');
     const [typeFilter, setTypeFilter] = useState('All');
-    const business = isBusinessUser(getStoredUser());
+        const business = isBusinessUser(getStoredUser());
+    const [selectedBranchId, setSelectedBranchId] = useState(() => localStorage.getItem('fintrack_selected_branch') || 'ALL');
     const [branches, setBranches] = useState([]);
     const [banks, setBanks] = useState([]);
     const [upis, setUpis] = useState([]);
@@ -176,8 +177,14 @@ export function TransactionsPage() {
         URL.revokeObjectURL(url);
     };
 
-    const load = () => api.transactions.list().then(setRows);
-    useEffect(() => { load(); api.types.list().then(setTypes); }, []);
+        const load = () => api.transactions.list(selectedBranchId).then(setRows);
+    useEffect(() => { load(); }, [selectedBranchId]);
+    useEffect(() => { api.types.list().then(setTypes); }, []);
+    useEffect(() => {
+        const handler = () => setSelectedBranchId(localStorage.getItem('fintrack_selected_branch') || 'ALL');
+        window.addEventListener('fintrack-branch-change', handler);
+        return () => window.removeEventListener('fintrack-branch-change', handler);
+    }, []);
     useEffect(() => { if (business) { api.business.branches.list().then(setBranches).catch(() => { }); api.business.bankAccounts.list().then(setBanks).catch(() => { }); api.business.upiAccounts.list().then(setUpis).catch(() => { }); } }, []);
     useEffect(() => { if (form.type) api.categories.list(form.type).then(setCategories); }, [form.type]);
 

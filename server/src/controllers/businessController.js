@@ -92,3 +92,13 @@ export async function updateStaff(req, res, next) {
     } catch (e) { next(e); }
 }
 export async function activityLogs(req, res, next) { try { res.json(await ActivityLog.find({ businessOwnerId: ownerIdFor(req.user) }).populate('staffUserId', 'name userName').sort({ createdAt: -1 })); } catch (e) { next(e); } }
+export async function deleteStaff(req, res, next) {
+    try {
+        if (req.user.role !== 'business_owner') return res.status(403).json({ message: 'Only a business owner can manage staff' });
+        const ownerId = ownerIdFor(req.user);
+        const staff = await User.findOneAndDelete({ _id: req.params.id, businessOwnerId: ownerId, role: 'business_staff' });
+        if (!staff) return res.status(404).json({ message: 'Staff member not found' });
+        try { await ActivityLog.create({ businessOwnerId: ownerId, staffUserId: staff._id, action: 'delete_staff', module: 'staff', recordId: staff._id, description: `${req.user.userName} removed staff member ${staff.name || staff.userName}` }); } catch { }
+        res.status(204).end();
+    } catch (e) { next(e); }
+}

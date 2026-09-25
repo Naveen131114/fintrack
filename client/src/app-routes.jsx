@@ -28,7 +28,7 @@ function PageLayout({ children }) {
     const [selectedBranchId, setSelectedBranchId] = useState(() => localStorage.getItem('fintrack_selected_branch') || 'ALL');
     const user = getCurrentUser();
     useEffect(() => { if (isBusinessUser(user)) api.business.branches.list().then((items) => setBranches(items.filter((item) => item.status === 'active'))).catch(() => {}); }, []);
-    const selectBranch = (id) => { setSelectedBranchId(id); localStorage.setItem('fintrack_selected_branch', id); };
+        const selectBranch = (id) => { setSelectedBranchId(id); localStorage.setItem('fintrack_selected_branch', id); window.dispatchEvent(new CustomEvent('fintrack-branch-change', { detail: { branchId: id } })); };
 
     useEffect(() => {
         document.documentElement.setAttribute('data-theme', theme);
@@ -39,8 +39,24 @@ function PageLayout({ children }) {
 }
 
 export default function AppRoutes() {
-    const currentUser = getCurrentUser();
-    const isAuthenticated = Boolean(localStorage.getItem('fintrack_access_token'));
+    const [authToken, setAuthToken] = useState(() => localStorage.getItem('fintrack_access_token'));
+    const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+
+    useEffect(() => {
+        const syncAuth = () => {
+            setAuthToken(localStorage.getItem('fintrack_access_token'));
+            setCurrentUser(getCurrentUser());
+        };
+        const onUnauthorized = () => syncAuth();
+        window.addEventListener('storage', syncAuth);
+        window.addEventListener('fintrack:unauthorized', onUnauthorized);
+        return () => {
+            window.removeEventListener('storage', syncAuth);
+            window.removeEventListener('fintrack:unauthorized', onUnauthorized);
+        };
+    }, []);
+
+    const isAuthenticated = Boolean(authToken);
     const superAdmin = isSuperAdminRole(currentUser);
 
     return <Routes>

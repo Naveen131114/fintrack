@@ -92,12 +92,12 @@ export default function App() {
     const balance = income - expenses;
     const visibleTransactions = showAllTransactions ? filtered : filtered.slice(0, 5);
 
-    const selectBranch = (id) => { setSelectedBranchId(id); localStorage.setItem('fintrack_selected_branch', id); };
+        const selectBranch = (id) => { setSelectedBranchId(id); localStorage.setItem('fintrack_selected_branch', id); window.dispatchEvent(new CustomEvent('fintrack-branch-change', { detail: { branchId: id } })); };
 
     const addTransaction = async (transaction) => {
         await api.transactions.create(transaction);
         setIsModalOpen(false);
-        api.transactions.list().then(setTransactions).catch(() => { });
+                api.transactions.list(selectedBranchId).then(setTransactions).catch(() => { });
     };
 
     const handleLogout = async () => {

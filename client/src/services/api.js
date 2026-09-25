@@ -9,15 +9,97 @@ function getAuthHeaders() {
     return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function clearAuthStorage() {
+    localStorage.removeItem('fintrack_access_token');
+    localStorage.removeItem('fintrack_refresh_token');
+    localStorage.removeItem('fintrack_user');
+}
+
+function isAuthEndpoint(path) {
+    return path.startsWith('/auth/login') || path.startsWith('/auth/refresh-token');
+}
+
+let redirectingToLogin = false;
+
+export function forceLogoutToLogin() {
+    clearAuthStorage();
+    window.dispatchEvent(new CustomEvent('fintrack:unauthorized'));
+    if (typeof window === 'undefined') return;
+    const onLoginPage = window.location.pathname === '/login';
+    if (onLoginPage || redirectingToLogin) return;
+    redirectingToLogin = true;
+    // Use assign so browser history does not keep protected pages behind.
+    window.location.assign('/login');
+    // Safety: allow future redirects (e.g. after a new login + expiry).
+    setTimeout(() => { redirectingToLogin = false; }, 2000);
+}
+
+async function tryRefreshAndRetry() {
+    const storedRefreshToken = localStorage.getItem('fintrack_refresh_token');
+    if (!storedRefreshToken) return false;
+    try {
+        // Direct fetch to avoid recursion through request().
+        const refreshResponse = await fetch(`${API_URL}/auth/refresh-token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken: storedRefreshToken })
+        });
+        if (!refreshResponse.ok) return false;
+        const refreshed = await refreshResponse.json().catch(() => null);
+        if (!refreshed?.accessToken) return false;
+        localStorage.setItem('fintrack_access_token', refreshed.accessToken);
+        if (refreshed.refreshToken) {
+            localStorage.setItem('fintrack_refresh_token', refreshed.refreshToken);
+        }
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 async function request(path, options = {}) {
+    const { _retry, ...fetchOptions } = options;
     const response = await fetch(`${API_URL}${path}`, {
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders(), ...options.headers },
-        ...options
+        ...fetchOptions,
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders(), ...fetchOptions.headers }
     });
+
+    if (response.status === 401 && !isAuthEndpoint(path) && !_retry) {
+        const refreshed = await tryRefreshAndRetry();
+        if (refreshed) {
+            const retryResponse = await fetch(`${API_URL}${path}`, {
+                ...fetchOptions,
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders(), ...fetchOptions.headers }
+            });
+            if (retryResponse.status === 401) {
+                forceLogoutToLogin();
+                const body = await retryResponse.json().catch(() => ({}));
+                const error = new Error(body.message || 'Session expired. Please log in again.');
+                error.status = 401;
+                throw error;
+            }
+            if (!retryResponse.ok) {
+                const body = await retryResponse.json().catch(() => ({}));
+                const error = new Error(body.message || 'Request failed');
+                error.status = retryResponse.status;
+                throw error;
+            }
+            return retryResponse.status === 204 ? null : retryResponse.json();
+        }
+
+        // No refresh possible (or refresh failed) -> session is dead: clear + go to login.
+        forceLogoutToLogin();
+        const body = await response.json().catch(() => ({}));
+        const error = new Error(body.message || 'Session expired. Please log in again.');
+        error.status = 401;
+        throw error;
+    }
 
     if (!response.ok) {
         const body = await response.json().catch(() => ({}));
-        throw new Error(body.message || 'Request failed');
+        const error = new Error(body.message || 'Request failed');
+        error.status = response.status;
+        throw error;
     }
 
     return response.status === 204 ? null : response.json();
@@ -42,9 +124,7 @@ export const api = {
             try {
                 await request('/auth/logout', { method: 'POST' });
             } finally {
-                localStorage.removeItem('fintrack_access_token');
-                localStorage.removeItem('fintrack_refresh_token');
-                localStorage.removeItem('fintrack_user');
+                clearAuthStorage();
             }
         },
         me: () => request('/auth/me')
@@ -54,7 +134,7 @@ export const api = {
         branches: { list: () => request('/business/branches'), create: (data) => request('/business/branches', { method: 'POST', body: JSON.stringify(data) }), update: (id, data) => request(`/business/branches/${id}`, { method: 'PUT', body: JSON.stringify(data) }), remove: (id) => request(`/business/branches/${id}`, { method: 'DELETE' }) },
         bankAccounts: { list: () => request('/business/bankAccounts'), create: (data) => request('/business/bankAccounts', { method: 'POST', body: JSON.stringify(data) }), update: (id, data) => request(`/business/bankAccounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }), remove: (id) => request(`/business/bankAccounts/${id}`, { method: 'DELETE' }) },
         upiAccounts: { list: () => request('/business/upiAccounts'), create: (data) => request('/business/upiAccounts', { method: 'POST', body: JSON.stringify(data) }), update: (id, data) => request(`/business/upiAccounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }), remove: (id) => request(`/business/upiAccounts/${id}`, { method: 'DELETE' }) },
-        staff: { list: () => request('/business/staff'), create: (data) => request('/business/staff', { method: 'POST', body: JSON.stringify(data) }), update: (id, data) => request(`/business/staff/${id}`, { method: 'PUT', body: JSON.stringify(data) }) },
+                staff: { list: () => request('/business/staff'), create: (data) => request('/business/staff', { method: 'POST', body: JSON.stringify(data) }), update: (id, data) => request(`/business/staff/${id}`, { method: 'PUT', body: JSON.stringify(data) }), remove: (id) => request(`/business/staff/${id}`, { method: 'DELETE' }) },
         activityLogs: () => request('/business/activity-logs')
     },
     types: { list: () => request('/masters/types'), create: (data) => request('/masters/types', { method: 'POST', body: JSON.stringify(data) }), update: (id, data) => request(`/masters/types/${id}`, { method: 'PUT', body: JSON.stringify(data) }), remove: (id) => request(`/masters/types/${id}`, { method: 'DELETE' }) },
