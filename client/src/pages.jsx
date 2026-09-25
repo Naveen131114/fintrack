@@ -152,7 +152,7 @@ export function TransactionsPage() {
         if (filter === 'this-week') { const start = new Date(year, month, today.getDate() - today.getDay()); const end = new Date(start); end.setDate(end.getDate() + 7); return [start, end]; }
         if (filter === 'this-month') return [new Date(year, month, 1), new Date(year, month + 1, 1)];
         if (filter === 'last-month') return [new Date(year, month - 1, 1), new Date(year, month, 1)];
-        if (filter === 'last-3-months') return [new Date(year, month - 3, 1), new Date(year, month + 1, 1)];
+        if (filter === 'last-3-months') return [new Date(year, month - 2, 1), new Date(year, month + 1, 1)];
         return [null, null];
     };
 
@@ -163,19 +163,6 @@ export function TransactionsPage() {
             return (typeFilter === 'All' || row.type === typeFilter) && (!start || (date >= start && date < end));
         });
     }, [rows, dateFilter, typeFilter]);
-
-    const exportRows = (format) => {
-        const text = filteredRows.map((row) => `${row.type} | ${row.category} | ${new Date(row.date).toLocaleDateString()} | ₹${row.amount} | ${row.description || row.title || ''}`).join('\n') || 'No transactions found';
-        const blob = format === 'xl'
-            ? new Blob([['Type', 'Category', 'Date', 'Description', 'Amount'].join(',') + '\n' + filteredRows.map((row) => [row.type, row.category, new Date(row.date).toLocaleDateString(), row.description || row.title || '', row.amount].map((value) => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n')], { type: 'text/csv' })
-            : new Blob([format === 'word' ? `<html><body><pre>${text}</pre></body></html>` : text], { type: format === 'word' ? 'application/msword' : 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `transactions.${format === 'xl' ? 'csv' : format === 'word' ? 'doc' : 'pdf'}`;
-        link.click();
-        URL.revokeObjectURL(url);
-    };
 
         const load = () => api.transactions.list(selectedBranchId).then(setRows);
     useEffect(() => { load(); }, [selectedBranchId]);

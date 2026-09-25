@@ -13,6 +13,12 @@ export function requireBusinessUser(req, res, next) {
     next();
 }
 
+export function requireBusinessOwner(req, res, next) {
+    if (!isBusinessUser(req.user)) return res.status(403).json({ message: 'Business account access required' });
+    if (req.user.role !== 'business_owner') return res.status(403).json({ message: 'Only a business owner can update the PDF template' });
+    next();
+}
+
 // Transactions are a core personal feature as well: personal users and super
 // admins manage their own records (the controller scopes every query by
 // userId), so they must not be rejected here. Business users still pass the

@@ -41,6 +41,9 @@ function serializeUser(user) {
         subscriptionEndDate: user.subscriptionEndDate,
         paymentReference: user.paymentReference,
         paymentScreenshotUrl: user.paymentScreenshotUrl,
+        businessName: user.businessName || '',
+        businessAddress: user.businessAddress || '',
+        hasBusinessLogo: Boolean(user.businessLogo),
         createdAt: user.createdAt,
         updatedAt: user.updatedAt
     };
