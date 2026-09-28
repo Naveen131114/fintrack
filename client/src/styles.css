@@ -1586,6 +1586,70 @@ nav {
     margin-top: 4px;
 }
 
+/* Analytics From / To month filter (business plan logins): its options are the
+   months that have a saved Overall Report entry, and the money-flow cards plus
+   the Overall Report table below both follow the selected window. */
+.analytics-month-filter {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 20px 0 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+}
+
+.analytics-month-filter label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.analytics-month-filter select {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 8px 10px;
+    font-size: 12px;
+    outline: none;
+}
+
+.analytics-month-filter select:focus {
+    border-color: var(--green);
+}
+
+.analytics-month-filter select:disabled {
+    opacity: .6;
+    cursor: not-allowed;
+}
+
+.analytics-month-hint {
+    color: var(--muted);
+    font-size: 11px;
+    margin-left: auto;
+}
+
+@media (max-width: 680px) {
+    .analytics-month-filter {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .analytics-month-filter label {
+        justify-content: space-between;
+    }
+
+    .analytics-month-hint {
+        margin-left: 0;
+    }
+}
+
 .profit-loss.profit {
     color: #1b6942;
     font-weight: 700;

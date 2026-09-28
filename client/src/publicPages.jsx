@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './services/api';
 import DataTable from './components/DataTable';
 import { getStoredUser, isBusinessOwner, isBusinessUser } from './utils/roles';
@@ -74,6 +74,11 @@ export function AnalyticsPage() {
     const [reportError, setReportError] = useState('');
     const exportRef = useRef(null);
 
+    // From month / To month filter: the pickers are fed by the months that
+    // already have a saved Overall Report entry, so no empty range can be picked.
+    const [fromMonth, setFromMonth] = useState('');
+    const [toMonth, setToMonth] = useState('');
+
     // Branches power the report's Branch column and the picker in its form.
     useEffect(() => {
         if (!businessUser) return undefined;
@@ -113,6 +118,38 @@ export function AnalyticsPage() {
         return () => { cancelled = true; };
     }, [hasBusinessPlan, selectedBranchId]);
 
+    // Months that actually have a saved report entry (oldest first) - the only
+    // values the Analytics From / To month filter can offer.
+    const reportMonths = useMemo(() => [...new Set(reports.map((report) => report.month))].sort(), [reports]);
+    const reportMonthsKey = reportMonths.join('|');
+
+    // Default the range to every saved month and keep it valid when the branch
+    // filter (or a newly saved / deleted row) changes the month list.
+    useEffect(() => {
+        if (!reportMonths.length) {
+            setFromMonth('');
+            setToMonth('');
+            return;
+        }
+        const first = reportMonths[0];
+        const last = reportMonths[reportMonths.length - 1];
+        setFromMonth((current) => (reportMonths.includes(current) ? current : first));
+        setToMonth((current) => (reportMonths.includes(current) ? current : last));
+    }, [reportMonthsKey]);
+
+    // A range can never be inverted: moving one picker past its partner drags
+    // the partner along, so the page always shows at least one saved month.
+    const changeFromMonth = (event) => {
+        const value = event.target.value;
+        setFromMonth(value);
+        setToMonth((current) => (!current || current < value ? value : current));
+    };
+    const changeToMonth = (event) => {
+        const value = event.target.value;
+        setToMonth(value);
+        setFromMonth((current) => (!current || current > value ? value : current));
+    };
+
     // Switching branch leaves edit mode (the edited row may not even be in the
     // newly selected branch) and re-seeds the form's default branch.
     useEffect(() => {
@@ -141,6 +178,10 @@ export function AnalyticsPage() {
             const keyChanged = editing && (editing.month !== payload.month || String(editing.branchId || '') !== String(payload.branchId || ''));
             if (keyChanged) await api.reports.remove(editing._id);
             setReportMessage(editing ? 'Report updated' : 'Report saved');
+            // Keep the saved month visible: an entry saved outside the current
+            // window would otherwise look like it was never stored.
+            setFromMonth((current) => (current && current > payload.month ? payload.month : current));
+            setToMonth((current) => (current && current < payload.month ? payload.month : current));
             setEditing(null);
             setReportForm(newReportForm());
             loadReports();
@@ -178,12 +219,20 @@ export function AnalyticsPage() {
     const activeBranches = branches.filter((branch) => branch.status === 'active');
     const selectedBranch = selectedBranchId === 'ALL' ? null : branches.find((branch) => String(branch._id) === String(selectedBranchId)) || null;
     const branchScope = selectedBranch ? selectedBranch.branchName : 'all branches';
-    // The branch travels into the export heading (and file name) so a filtered
-    // report can never be mistaken for the all-branches one.
-    const reportExportTitle = selectedBranch ? `Overall Business Report - ${selectedBranch.branchName}` : 'Overall Business Report';
+    // The month range on screen, e.g. "April 2026 to September 2026".
+    const monthRangeLabel = reportMonths.length
+        ? (fromMonth === toMonth ? formatMonthLabel(fromMonth) : `${formatMonthLabel(fromMonth)} to ${formatMonthLabel(toMonth)}`)
+        : '';
+    // The branch (and the month range) travel into the export heading (and
+    // file) so a filtered report is never mistaken for the full one.
+    const reportExportTitle = `Overall Business Report${selectedBranch ? ` - ${selectedBranch.branchName}` : ''}${monthRangeLabel ? ` (${monthRangeLabel})` : ''}`;
+
+    // Only entries inside the From-To month window reach the cards, the table
+    // and every export, so the whole page reads as one consistent period.
+    const visibleReports = reports.filter((report) => (!fromMonth || report.month >= fromMonth) && (!toMonth || report.month <= toMonth));
 
     // Balance and profit-or-loss are derived from income - expenses.
-    const reportRows = reports.map((report) => {
+    const reportRows = visibleReports.map((report) => {
         const balance = Number(report.income || 0) - Number(report.expenses || 0);
         return { ...report, branchLabel: branchLabelFor(report.branchId), balance, profitLoss: balance >= 0 ? 'Profit' : 'Loss' };
     });
@@ -231,21 +280,41 @@ export function AnalyticsPage() {
 
     const planPending = businessUser && hasBusinessPlan === null;
     const showOverallReport = businessUser && hasBusinessPlan === true;
+
+    // Business plan logins read the cards from the Overall Report entries - the
+    // very same From-To month filter as the table below; everyone else keeps the
+    // transaction money flow.
+    const cardIncome = showOverallReport ? reportTotals.income : income;
+    const cardExpense = showOverallReport ? reportTotals.expenses : expense;
+    const cardBalance = showOverallReport ? reportTotals.balance : income - expense;
     return <div className="resource-page">
         <p className="eyebrow">Insights</p>
         <h1>Analytics</h1>
         <p className="subheading">A clear view of your money flow{businessUser && selectedBranch ? ` for ${selectedBranch.branchName}` : ''}.</p>
+        {showOverallReport && <div className="analytics-month-filter">
+            <label>From month
+                <select value={fromMonth} onChange={changeFromMonth} disabled={!reportMonths.length} aria-label="From month">
+                    {reportMonths.map((month) => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
+                </select>
+            </label>
+            <label>To month
+                <select value={toMonth} onChange={changeToMonth} disabled={!reportMonths.length} aria-label="To month">
+                    {reportMonths.map((month) => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
+                </select>
+            </label>
+            <span className="analytics-month-hint">{reportMonths.length ? `Showing ${formatMonthLabel(fromMonth)} to ${formatMonthLabel(toMonth)} from your saved report entries.` : 'Save a report entry to filter by month.'}</span>
+        </div>}
         <div className="summary-grid analytics-cards">
-            <div className="summary-card income"><span>Income</span><strong className="summary-value">{money(income)}</strong></div>
-            <div className="summary-card expense"><span>Expenses</span><strong className="summary-value">{money(expense)}</strong></div>
-            <div className="summary-card balance"><span>Net cash flow</span><strong className="summary-value">{money(income - expense)}</strong></div>
+            <div className="summary-card income"><span>Income</span><strong className="summary-value">{money(cardIncome)}</strong></div>
+            <div className="summary-card expense"><span>Expenses</span><strong className="summary-value">{money(cardExpense)}</strong></div>
+            <div className="summary-card balance"><span>{showOverallReport ? 'Balance' : 'Net cash flow'}</span><strong className="summary-value">{showOverallReport ? signedMoney(cardBalance) : money(cardBalance)}</strong></div>
         </div>
         {planPending ? null : showOverallReport ? (
             <section className="panel insight-panel">
                 <div className="panel-head">
                     <div>
                         <h2>Overall Report</h2>
-                        <p className="subheading">Month-wise business performance for {branchScope}, ready to export.</p>
+                        <p className="subheading">Month-wise business performance for {branchScope}{monthRangeLabel ? ` (${monthRangeLabel})` : ''}, ready to export.</p>
                     </div>
                     <div className="txn-table-tools">
                         <span className="export-label">Export as</span>
