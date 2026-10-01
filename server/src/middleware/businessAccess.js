@@ -1,6 +1,6 @@
 import Branch from '../models/Branch.js';
 import Subscription from '../models/Subscription.js';
-import User from '../models/User.js';
+import User, { MANAGE_BUSINESS_MODULES, resolvePermissions } from '../models/User.js';
 
 export function isBusinessUser(user) {
     return !!user && ['business_owner', 'business_staff'].includes(user.role);
@@ -17,7 +17,7 @@ export function requireBusinessUser(req, res, next) {
 
 export function requireBusinessOwner(req, res, next) {
     if (!isBusinessUser(req.user)) return res.status(403).json({ message: 'Business account access required' });
-    if (req.user.role !== 'business_owner') return res.status(403).json({ message: 'Only a business owner can update the PDF template' });
+    if (req.user.role !== 'business_owner') return res.status(403).json({ message: 'Only a business owner can manage staff and business settings' });
     next();
 }
 
@@ -38,19 +38,74 @@ export async function requireBusinessPlan(req, res, next) {
     }
 }
 
-// Transactions are a core personal feature as well: personal users and super
-// admins manage their own records (the controller scopes every query by
-// userId), so they must not be rejected here. Business users still pass the
-// permission-rank check, and branch/business validation happens in the
-// controller via assertBranchAccess/branchFilter — this does NOT weaken
-// business authorization.
-export function requireTransactionAccess(level) {
-    const ranks = { view: 1, edit: 2, full: 3 };
+// Granular permission guards.
+// ---------------------------------------------------------------------------
+// resolvePermissions() understands both a hydrated User document and a plain
+// object, so it works with whatever authenticateToken puts on req.user - and a
+// record that only has the legacy permissionLevel still resolves correctly.
+export function permissionsFor(user) {
+    return resolvePermissions(user);
+}
+
+// Modules where ADDING a record is open to every staff member: recording a
+// transaction is personal data entry, so it never needs a flag or a request.
+// The client mirrors this - see OPEN_CREATE_MODULES in utils/permissions.
+export const OPEN_CREATE_MODULES = ['transactions'];
+
+// Body of every permission check: owners and personal accounts manage their own
+// data, staff need the matching flag - or an approval grant for this module.
+// `recordId` (optional) pins the question to ONE record - see grantMatches.
+export function canPerform(user, action, module, recordId = null) {
+    if (!isBusinessUser(user)) return true;
+    if (user.role === 'business_owner') return true;
+    // Open module (see above): no flag and no grant needed to add a record there.
+    if (action === 'create' && OPEN_CREATE_MODULES.includes(module)) return true;
+    const permissions = resolvePermissions(user);
+    // An approved request unlocks exactly this module + action, whatever else
+    // the profile says - and, when the request named a record, only that record.
+    if (permissions.grants.some((grant) => grantMatches(grant, module, action, recordId))) return true;
+    if (permissions[action] !== true) return false;
+    // Business-level records (branches, bank and UPI accounts) additionally need
+    // "manage business" to be CHANGED. Reading them stays open to any staff
+    // member who can view, because the branch picker needs them.
+    if (action !== 'view' && MANAGE_BUSINESS_MODULES.includes(module)) return permissions.manageBusiness === true;
+    return true;
+}
+
+// One approval grant = one module + action, optionally pinned to the single
+// record the request was filed against (a request for row A must never unlock
+// row B). A grant without a recordId is module-wide; a caller that does not
+// pass a recordId asks the module-wide question, which a record-scoped grant
+// still answers - so page-level checks keep working.
+export function grantMatches(grant, module, action, recordId = null) {
+    if (!grant || grant.module !== module || grant.action !== action) return false;
+    if (!grant.recordId || !recordId) return true;
+    return String(grant.recordId) === String(recordId);
+}
+
+// 403 payload the client recognises to offer the "Request approval" dialog
+// instead of a dead-end error.
+export const PERMISSION_REQUEST_CODE = 'PERMISSION_REQUEST_REQUIRED';
+export function permissionDenied(res, action, module) {
+    return res.status(403).json({
+        message: `Your profile does not allow you to ${action} these records. Send a request and the owner can approve it.`,
+        code: PERMISSION_REQUEST_CODE,
+        permission: { action, module: module || null }
+    });
+}
+
+// Express guard for a single granular action. `module` is optional: it is
+// required for business-level records and is what an approved request unlocks.
+// It may also be a function of the request, for routes whose module lives in the
+// URL (/:resource...). `recordId` - a value or a function of the request - pins
+// the guard to ONE row, so an approval for one transaction never authorises a
+// change to another.
+export function requirePermission(action, module, recordId = null) {
     return (req, res, next) => {
         if (!req.user) return res.status(401).json({ message: 'Authentication required' });
-        if (!isBusinessUser(req.user)) return next();
-        if (req.user.role === 'business_owner') return next();
-        if (req.user.role !== 'business_staff' || ranks[req.user.permissionLevel] < ranks[level]) return res.status(403).json({ message: 'You do not have permission for this action' });
+        const target = typeof module === 'function' ? module(req) : module;
+        const record = typeof recordId === 'function' ? recordId(req) : recordId;
+        if (!canPerform(req.user, action, target, record || null)) return permissionDenied(res, action, target);
         next();
     };
 }
@@ -62,23 +117,9 @@ export function dataOwnerIdFor(user) {
     return isBusinessUser(user) ? ownerIdFor(user) : user?.id;
 }
 
-// Staff can view the owner's shared data but never modify it. Business owners
-// and personal users (for their own data) keep full control.
-export function requireDataWrite(req, res, next) {
-    if (!req.user) return res.status(401).json({ message: 'Authentication required' });
-    if (req.user.role === 'business_staff') return res.status(403).json({ message: 'You do not have permission for this action' });
-    next();
-}
-
-export function requirePermission(level) {
-    const ranks = { view: 1, edit: 2, full: 3 };
-    return (req, res, next) => {
-        if (!isBusinessUser(req.user)) return res.status(403).json({ message: 'Business account access required' });
-        if (req.user.role === 'business_owner') return next();
-        if (req.user.role !== 'business_staff' || ranks[req.user.permissionLevel] < ranks[level]) return res.status(403).json({ message: 'You do not have permission for this action' });
-        next();
-    };
-}
+// Business-level records are owner territory unless the owner explicitly granted
+// canManageBusiness - see requirePermission, which applies that rule through
+// canPerform for every module in MANAGE_BUSINESS_MODULES.
 
 export async function assertBranchAccess(user, branchId) {
     if (!branchId) throw Object.assign(new Error('Branch is required for business records'), { status: 400 });

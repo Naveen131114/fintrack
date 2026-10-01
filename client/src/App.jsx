@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ChevronDown, FileText, LogOut, Menu, Plus, Search, Settings } from 'lucide-react';
+import { CalendarDays, ChevronDown, FileText, LogOut, Menu, Plus, Search, Settings, ShieldQuestion } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import SummaryCard from './components/SummaryCard';
 import TransactionList from './components/TransactionList';
 import ExpenseChart from './components/ExpenseChart';
 import AddTransactionModal from './components/AddTransactionModal';
+import NotificationBell from './components/NotificationBell';
 import PdfTemplateSettings from './components/PdfTemplateSettings';
+import { useChangeRequest } from './components/RequestApproval';
 import { api } from './services/api';
-import { getStoredUser, isBusinessStaff, isBusinessUser } from './utils/roles';
+import { canCreate, canRequest, refreshPermissions } from './utils/permissions';
+import { getStoredUser, isBusinessStaff, isBusinessUser, useStoredUser } from './utils/roles';
 
 const money = (value) => `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -60,6 +63,18 @@ export default function App() {
     const [branches, setBranches] = useState([]);
     const [selectedBranchId, setSelectedBranchId] = useState(() => localStorage.getItem('fintrack_selected_branch') || 'ALL');
     const [pdfTemplateOpen, setPdfTemplateOpen] = useState(false);
+    const [error, setError] = useState('');
+    // Rights for this screen. `useStoredUser` re-reads the profile whenever it
+    // changes, so an approval that lands while the dashboard is open unlocks the
+    // add button in place instead of leaving it hidden (see refreshPermissions).
+    const currentUser = useStoredUser();
+    const changes = useChangeRequest('transactions');
+    const mayCreateTransaction = canCreate(currentUser, 'transactions');
+
+    // Whatever was decided while this tab was elsewhere (an owner approving a
+    // request hands the requester a grant) must be in force before the first
+    // click, so the landing page re-reads the profile once on open.
+    useEffect(() => { if (isBusinessUser(currentUser)) refreshPermissions(); }, []);
 
     useEffect(() => {
         const user = getStoredUser();
@@ -97,9 +112,18 @@ export default function App() {
         const selectBranch = (id) => { setSelectedBranchId(id); localStorage.setItem('fintrack_selected_branch', id); window.dispatchEvent(new CustomEvent('fintrack-branch-change', { detail: { branchId: id } })); };
 
     const addTransaction = async (transaction) => {
-        await api.transactions.create(transaction);
-        setIsModalOpen(false);
-                api.transactions.list(selectedBranchId).then(setTransactions).catch(() => { });
+        setError('');
+        try {
+            await api.transactions.create(transaction);
+            setIsModalOpen(false);
+            api.transactions.list(selectedBranchId).then(setTransactions).catch(() => { });
+        } catch (err) {
+            // The server is the authority. A profile that may not add records gets
+            // the "request approval" dialog here instead of a silent failure.
+            setIsModalOpen(false);
+            if (changes.onRequestError(err, null, 'create')) return;
+            setError(err.message);
+        }
     };
 
     const handleLogout = async () => {
@@ -112,5 +136,7 @@ export default function App() {
         }
     };
 
-    return <div className="app-shell">{mobileMenuOpen && <div className="mobile-backdrop" onClick={() => setMobileMenuOpen(false)} />}<Sidebar mobileMenuOpen={mobileMenuOpen} onCloseMobileMenu={() => setMobileMenuOpen(false)} /><main className="main-content"><header className="topbar"><button className="mobile-menu icon-button" aria-label="Open menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronDown size={14} /><strong>Overview</strong></div>{isBusinessUser(getStoredUser()) && <select aria-label="Branch selector" value={selectedBranchId} onChange={(event) => selectBranch(event.target.value)}><option value="ALL">All branches</option>{branches.map((branch) => <option value={branch._id} key={branch._id}>{branch.branchName}</option>)}</select>}<div className="topbar-actions"><div className={`search-wrap ${searchOpen ? 'open' : ''}`}><Search size={16} /><input type="text" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search transactions" aria-label="Search transactions" /></div><button className="icon-button search-button" aria-label="Search transactions" onClick={() => setSearchOpen((value) => !value)}><Search size={19} /></button><div className="profile-menu-wrap"><button className="topbar-avatar" title="User Profile" type="button" onClick={() => setProfileMenuOpen((value) => !value)}>FT</button>{profileMenuOpen && <div className="profile-menu"><button type="button" className="profile-menu-item" onClick={() => { setTheme((value) => value === 'light' ? 'dark' : 'light'); setProfileMenuOpen(false); }}><Settings size={15} />Settings</button>{isBusinessUser(getStoredUser()) && <button type="button" className="profile-menu-item" onClick={() => { setProfileMenuOpen(false); setPdfTemplateOpen(true); }}><FileText size={15} />PDF Template</button>}<button type="button" className="profile-menu-item danger" onClick={handleLogout}><LogOut size={15} />Logout</button></div>}</div></div></header><div className="page-content"><div className="page-heading"><div><p className="eyebrow">{new Date().toLocaleDateString('en-IN', { dateStyle: 'full' })}</p><h1>Your financial snapshot <span>✦</span></h1><p className="subheading">Track your income and expenses for this month.</p></div><button className="primary-button" onClick={() => setIsModalOpen(true)}><Plus size={18} />Add transaction</button></div><div className="toolbar"><div className="overview-date-filter-group"><button className="date-filter" type="button" onClick={() => setFilterOpen((value) => !value)}><CalendarDays size={17} />{DATE_OPTIONS.find((option) => option.value === dateFilter)?.label || 'This month'}<ChevronDown size={15} /></button>{filterOpen && <div className="overview-date-filter-dropdown">{DATE_OPTIONS.map((option) => <button key={option.value} type="button" className={dateFilter === option.value ? 'selected' : ''} onClick={() => { setDateFilter(option.value); setFilterOpen(false); }}>{option.label}</button>)}</div>}</div><span className="updated">Synced with your account</span></div><section className="summary-grid"><SummaryCard type="balance" label="Total balance" value={money(balance)} change="Live" tone="balance" /><SummaryCard type="income" label="Total income" value={money(income)} change="Live" tone="income" /><SummaryCard type="expense" label="Total expenses" value={money(expenses)} change="Live" tone="expense" /></section><div className="dashboard-grid"><TransactionList transactions={visibleTransactions} onSeeAll={() => setShowAllTransactions((value) => !value)} showAll={showAllTransactions} /><ExpenseChart transactions={filtered} /></div></div></main>{isModalOpen && <AddTransactionModal onClose={() => setIsModalOpen(false)} onAdd={addTransaction} />}{pdfTemplateOpen && isBusinessUser(getStoredUser()) && <PdfTemplateSettings onClose={() => setPdfTemplateOpen(false)} />}</div>;
+    return <div className="app-shell">{mobileMenuOpen && <div className="mobile-backdrop" onClick={() => setMobileMenuOpen(false)} />}<Sidebar mobileMenuOpen={mobileMenuOpen} onCloseMobileMenu={() => setMobileMenuOpen(false)} /><main className="main-content"><header className="topbar"><button className="mobile-menu icon-button" aria-label="Open menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronDown size={14} /><strong>Overview</strong></div>{isBusinessUser(getStoredUser()) && <select aria-label="Branch selector" value={selectedBranchId} onChange={(event) => selectBranch(event.target.value)}><option value="ALL">All branches</option>{branches.map((branch) => <option value={branch._id} key={branch._id}>{branch.branchName}</option>)}</select>}<div className="topbar-actions"><div className={`search-wrap ${searchOpen ? 'open' : ''}`}><Search size={16} /><input type="text" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search transactions" aria-label="Search transactions" /></div><button className="icon-button search-button" aria-label="Search transactions" onClick={() => setSearchOpen((value) => !value)}><Search size={19} /></button>{isBusinessUser(currentUser) && <NotificationBell />}<div className="profile-menu-wrap"><button className="topbar-avatar" title="User Profile" type="button" onClick={() => setProfileMenuOpen((value) => !value)}>FT</button>{profileMenuOpen && <div className="profile-menu"><button type="button" className="profile-menu-item" onClick={() => { setTheme((value) => value === 'light' ? 'dark' : 'light'); setProfileMenuOpen(false); }}><Settings size={15} />Settings</button>{isBusinessUser(currentUser) && <button type="button" className="profile-menu-item" onClick={() => { setProfileMenuOpen(false); setPdfTemplateOpen(true); }}><FileText size={15} />PDF Template</button>}<button type="button" className="profile-menu-item danger" onClick={handleLogout}><LogOut size={15} />Logout</button></div>}</div></div></header><div className="page-content"><div className="page-heading"><div><p className="eyebrow">{new Date().toLocaleDateString('en-IN', { dateStyle: 'full' })}</p><h1>Your financial snapshot <span>✦</span></h1><p className="subheading">Track your income and expenses for this month.</p></div>{mayCreateTransaction
+                    ? <button className="primary-button" onClick={() => setIsModalOpen(true)}><Plus size={18} />Add transaction</button>
+                    : canRequest(currentUser, 'transactions', 'create') && <button className="secondary-button" type="button" onClick={() => changes.requestChange('create', null)}><ShieldQuestion size={18} />Request add access</button>}</div><div className="toolbar"><div className="overview-date-filter-group"><button className="date-filter" type="button" onClick={() => setFilterOpen((value) => !value)}><CalendarDays size={17} />{DATE_OPTIONS.find((option) => option.value === dateFilter)?.label || 'This month'}<ChevronDown size={15} /></button>{filterOpen && <div className="overview-date-filter-dropdown">{DATE_OPTIONS.map((option) => <button key={option.value} type="button" className={dateFilter === option.value ? 'selected' : ''} onClick={() => { setDateFilter(option.value); setFilterOpen(false); }}>{option.label}</button>)}</div>}</div><span className="updated">Synced with your account</span></div>{error && <div className="error-banner">{error}</div>}{changes.notice}<section className="summary-grid"><SummaryCard type="balance" label="Total balance" value={money(balance)} change="Live" tone="balance" /><SummaryCard type="income" label="Total income" value={money(income)} change="Live" tone="income" /><SummaryCard type="expense" label="Total expenses" value={money(expenses)} change="Live" tone="expense" /></section><div className="dashboard-grid"><TransactionList transactions={visibleTransactions} onSeeAll={() => setShowAllTransactions((value) => !value)} showAll={showAllTransactions} /><ExpenseChart transactions={filtered} /></div></div></main>{isModalOpen && mayCreateTransaction && <AddTransactionModal onClose={() => setIsModalOpen(false)} onAdd={addTransaction} />}{changes.modal}{pdfTemplateOpen && isBusinessUser(getStoredUser()) && <PdfTemplateSettings onClose={() => setPdfTemplateOpen(false)} />}</div>;
 }

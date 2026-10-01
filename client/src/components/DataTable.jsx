@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Pencil, ShieldQuestion, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { getStoredUser, isBusinessUser } from '../utils/roles';
@@ -126,7 +126,10 @@ function distributeColumnWidths(labels, rows, total) {
     return widths;
 }
 
-function createPdf(rows, rawTitle = 'Transactions', branding = null, labels = null) {
+// `boldRowIndex` marks the trailing total row (transactions total or custom
+// summary); it is drawn with the bold face so the PDF emphasises it the same
+// way the on-screen table does. -1 = no row is bold.
+function createPdf(rows, rawTitle = 'Transactions', branding = null, labels = null, boldRowIndex = -1) {
     const title = String(rawTitle || 'Transactions');
     // Neat business header: logo (left, width set by the owner as a % of the
     // page) + business name + address flush to the right end, only when the
@@ -247,27 +250,47 @@ function createPdf(rows, rawTitle = 'Transactions', branding = null, labels = nu
             };
 
             // Business name + address aligned to the right end of the header.
+            // Business name + address block positioned at the right end,
+            // but text is left-aligned within the block.
             let cursorY = 762;
+
+            const headerTextRight = tableRight;
+            const headerTextWidth = 180;
+            const headerTextLeft = headerTextRight - headerTextWidth;
+
             if (header.name) {
                 const name = fitToWidth(header.name.slice(0, 60), 13);
+
                 content.push('BT');
                 content.push('/F1 13 Tf');
-                content.push(`1 0 0 1 ${round(tableRight - estimateTextWidth(name, 13))} ${cursorY} Tm`);
+                content.push(`1 0 0 1 ${round(headerTextLeft)} ${cursorY} Tm`);
                 content.push(`(${escapePdf(name)}) Tj`);
                 content.push('ET');
+
                 cursorY -= 14;
             }
+
             if (header.address) {
-                const lines = header.address.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 3);
+                const lines = header.address
+                    .split(/\r?\n/)
+                    .map((l) => l.trim())
+                    .filter(Boolean)
+                    .slice(0, 3);
+
                 content.push('BT');
                 content.push('/F1 8 Tf');
                 content.push('0.35 0.35 0.35 rg');
+
                 lines.forEach((line, i) => {
                     const text = fitToWidth(line.slice(0, 80), 8);
                     const y = cursorY - (i * 10);
-                    content.push(`1 0 0 1 ${round(tableRight - estimateTextWidth(text, 8))} ${y} Tm`);
+
+                    content.push(
+                        `1 0 0 1 ${round(headerTextLeft)} ${y} Tm`
+                    );
                     content.push(`(${escapePdf(text)}) Tj`);
                 });
+
                 content.push('ET');
                 content.push('0 0 0 rg');
             }
@@ -371,6 +394,11 @@ function createPdf(rows, rawTitle = 'Transactions', branding = null, labels = nu
 
             const textY = rowTop - 16;
 
+            // The trailing total row prints bold (F2 = Helvetica-Bold), then the
+            // regular face is restored so nothing else shifts weight.
+            const isBoldRow = boldRowIndex >= 0 && row === rows[boldRowIndex];
+            if (isBoldRow) content.push('/F2 9 Tf');
+
             row.forEach((value, columnIndex) => {
 
                 let text = String(value ?? '');
@@ -413,6 +441,8 @@ function createPdf(rows, rawTitle = 'Transactions', branding = null, labels = nu
                     );
                 }
             });
+
+            if (isBoldRow) content.push('/F1 9 Tf');
         });
 
         content.push('ET');
@@ -473,6 +503,10 @@ function createPdf(rows, rawTitle = 'Transactions', branding = null, labels = nu
 
     // Pages
     const logoObjectNumber = logoImage ? (4 + (pdfPages.length * 2)) : null;
+    // Helvetica-Bold is appended AFTER the page objects (and the optional logo)
+    // so the existing object numbering stays put; every page registers it as
+    // F2 next to the regular F1 face.
+    const boldFontObjectNumber = 4 + (pdfPages.length * 2) + (logoImage ? 1 : 0);
     const pageObjectRefs = [];
 
     pdfPages.forEach((_, index) => {
@@ -507,7 +541,7 @@ function createPdf(rows, rawTitle = 'Transactions', branding = null, labels = nu
 
         // Page object
         objects.push(
-            `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R >>${logoImage ? ` /XObject << /Logo ${logoObjectNumber} 0 R >>` : ''} >> /Contents ${contentObjectNumber} 0 R >>`
+            `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R /F2 ${boldFontObjectNumber} 0 R >>${logoImage ? ` /XObject << /Logo ${logoObjectNumber} 0 R >>` : ''} >> /Contents ${contentObjectNumber} 0 R >>`
         );
 
         // Content object
@@ -526,6 +560,11 @@ endstream`
             `<< /Type /XObject /Subtype /Image /Width ${logoImage.width} /Height ${logoImage.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logoImage.body.length} >>\nstream\n${logoImage.body}\nendstream`
         );
     }
+
+    // Bold face for the trailing total row (F2 on every page).
+    objects.push(
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>'
+    );
 
     // -----------------------------
     // Build PDF
@@ -564,10 +603,21 @@ endstream`
 
     return pdf;
 }
-export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 8, dateFilter = 'all', typeFilter = 'All', onExportReady, showTotal = false, exportTitle = '', summary = null }) {
+export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 8, dateFilter = 'all', typeFilter = 'All', onExportReady, showTotal = false, exportTitle = '', summary = null, permissions = null, onRequest = null }) {
     const [page, setPage] = useState(1);
     // Read-only tables (no handlers) skip the Actions column entirely.
-    const showActions = Boolean(onEdit || onDelete);
+    // `permissions` (see utils/permissions) only ever REMOVES an action a page
+    // would otherwise offer; a removed one becomes a "request approval" button
+    // when the page supports the workflow through onRequest(action, row).
+    // It may be one object for the whole table, or a FUNCTION of the row - the
+    // form a page uses when approvals are scoped to a single record, so row A
+    // can hold the pencil while row B still shows the request shield.
+    const rowPermissions = (row) => (typeof permissions === 'function' ? permissions(row) : permissions) || {};
+    const showActions = Boolean(onEdit || onDelete)
+        && (typeof permissions === 'function'
+            || permissions?.canEdit !== false
+            || permissions?.canDelete !== false
+            || Boolean(onRequest));
     useEffect(() => { setPage(1); }, [dateFilter, typeFilter, rows]);
     const isTransactionsTable = columns.some((column) => column.key === 'category') && columns.some((column) => column.key === 'type');
     const filteredRows = isTransactionsTable ? rows.filter((row) => {
@@ -604,6 +654,9 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
         const exportSummaryIndex = (summary?.exportValues && !isTransactionsTable && data.length)
             ? data.push(columns.map((column) => String(summary.exportValues[column.key] ?? ''))) - 1
             : -1;
+        // Trailing totals row the PDF should print bold: the transactions total
+        // (always appended last above) or the custom-table summary row.
+        const boldRowIndex = isTransactionsTable ? data.length - 1 : exportSummaryIndex;
         const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         // Transactions keep their fixed column styling; custom tables right-align
         // numeric cells (income, expenses, balance) and leave text left.
@@ -674,7 +727,7 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
             // the same header section as the transactions report; personal
             // users (and unbranded businesses) get a plain PDF.
             const branding = await getBusinessBranding();
-            const pdfString = createPdf(data, reportTitle, branding, isTransactionsTable ? null : columns.map((column) => column.label));
+            const pdfString = createPdf(data, reportTitle, branding, isTransactionsTable ? null : columns.map((column) => column.label), boldRowIndex);
             const bytes = new Uint8Array(pdfString.length);
             for (let i = 0; i < pdfString.length; i++) bytes[i] = pdfString.charCodeAt(i) & 0xFF;
             const blob = new Blob([bytes], { type: 'application/pdf' });
@@ -699,7 +752,7 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
     // one value per column key; the row renders under the page rows - so it
     // stays visible on every page - and hides while the table has no records.
     const summaryRow = (summary && filteredRows.length) ? <tr className="total-row">{columns.map((column) => <td key={column.key}>{column.key === summary.labelKey ? <strong>{summary.label || 'Total'}</strong> : (summary.values?.[column.key] ?? '')}</td>)}{showActions && <td />}</tr> : null;
-    const totalRow = (showTotal && isTransactionsTable) ? <tr className="total-row"><td></td><td></td><td></td><td><strong>Total</strong></td><td className={`total-amount ${totalAmount >= 0 ? 'income' : 'expense'}`}>{totalAmount >= 0 ? '+' : '-'}{'₹' + Math.abs(totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td></td></tr> : null;
+    const totalRow = (showTotal && isTransactionsTable) ? <tr className="total-row"><td></td><td></td><td></td><td><strong>Total</strong></td><td className={`total-amount ${totalAmount >= 0 ? 'income' : 'expense'}`}>{totalAmount >= 0 ? '+' : '-'}{'₹' + Math.abs(totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>{showActions && <td></td>}</tr> : null;
     if (onExportReady) onExportReady.current = exportRows;
-    return <><div className="data-table-tools" /><div className="data-table-wrap"><table className="data-table"><thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}{showActions && <th>Actions</th>}</tr></thead><tbody>{current.map((row) => <tr key={row._id || row.id}>{columns.map((column) => <td key={column.key}>{column.render ? column.render(row) : row[column.key] || '-'}</td>)}{showActions && <td className="table-actions"><button className="table-icon" onClick={() => onEdit?.(row)} aria-label="Edit"><Pencil size={15} /></button><button className="table-icon delete" onClick={() => onDelete?.(row)} aria-label="Delete"><Trash2 size={15} /></button></td>}</tr>)}{summaryRow}{totalRow}</tbody></table>{!current.length && <div className="empty-state">No records found.</div>}</div><div className="pagination"><span>Showing {current.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length}</span><div><button className="table-icon" disabled={page === 1} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button><button className="table-icon" disabled={page === pages} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button></div></div></>;
+    return <><div className="data-table-tools" /><div className="data-table-wrap"><table className="data-table"><thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}{showActions && <th>Actions</th>}</tr></thead><tbody>{current.map((row) => { const perms = rowPermissions(row); const rowEdit = Boolean(onEdit) && perms.canEdit !== false; const rowDelete = Boolean(onDelete) && perms.canDelete !== false; const askEdit = Boolean(onEdit && onRequest) && perms.canEdit === false; const askDelete = Boolean(onDelete && onRequest) && perms.canDelete === false; return <tr key={row._id || row.id}>{columns.map((column) => <td key={column.key}>{column.render ? column.render(row) : row[column.key] || '-'}</td>)}{showActions && <td className="table-actions">{rowEdit && <button className="table-icon" onClick={() => onEdit(row)} aria-label="Edit"><Pencil size={15} /></button>}{askEdit && <button className="table-icon request" onClick={() => onRequest('edit', row)} aria-label="Request approval to edit" title="Your profile cannot edit this - send a request"><ShieldQuestion size={15} /></button>}{rowDelete && <button className="table-icon delete" onClick={() => onDelete(row)} aria-label="Delete"><Trash2 size={15} /></button>}{askDelete && <button className="table-icon request delete-request" onClick={() => onRequest('delete', row)} aria-label="Request approval to delete" title="Your profile cannot delete this - send a request"><ShieldQuestion size={15} /></button>}</td>}</tr>; })}{summaryRow}{totalRow}</tbody></table>{!current.length && <div className="empty-state">No records found.</div>}</div><div className="pagination"><span>Showing {current.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length}</span><div><button className="table-icon" disabled={page === 1} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button><button className="table-icon" disabled={page === pages} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button></div></div></>;
 }

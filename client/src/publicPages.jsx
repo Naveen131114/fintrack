@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './services/api';
 import DataTable from './components/DataTable';
-import { getStoredUser, isBusinessOwner, isBusinessUser } from './utils/roles';
+import { useChangeRequest } from './components/RequestApproval';
+import { isBusinessUser, useStoredUser } from './utils/roles';
+import { canEdit, canRequest, tablePermissions } from './utils/permissions';
 
 const money = (value) => `₹${Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
 // Signed money for the report Balance column: "+₹1,200.00" / "-₹1,200.00"
@@ -43,10 +45,17 @@ export function LoginPage() {
 }
 
 export function AnalyticsPage() {
-    const user = getStoredUser();
+    // Live profile: the Overall Report actions follow monthlyReports rights, and
+    // an approval granted while this page is open must unlock them in place.
+    const user = useStoredUser();
     // Business PLAN logins get the Overall Report; everyone else keeps Transaction mix.
     const businessUser = isBusinessUser(user);
-    const canManageReports = isBusinessOwner(user);
+    // The Overall Report form and row actions follow the granular
+    // `monthlyReports` right, so a view-only staff profile gets the request
+    // route instead of a dead end.
+    const canManageReports = isBusinessUser(user) ? canEdit(user, 'monthlyReports') : false;
+    const mayAskForReports = canRequest(user, 'monthlyReports', 'create');
+    const changes = useChangeRequest('monthlyReports');
 
     // Branch filter: the top navbar branch selector is the single source of
     // truth (same pattern as TransactionsPage) and the money-flow cards plus
@@ -186,6 +195,7 @@ export function AnalyticsPage() {
             setReportForm(newReportForm());
             loadReports();
         } catch (error) {
+            if (changes.onRequestError(error, editing, editing ? 'edit' : 'create')) return;
             setReportError(error.message);
         }
     };
@@ -208,6 +218,7 @@ export function AnalyticsPage() {
             await api.reports.remove(row._id);
             loadReports();
         } catch (error) {
+            if (changes.onRequestError(error, row, 'delete')) return;
             setReportError(error.message);
         }
     };
@@ -323,6 +334,7 @@ export function AnalyticsPage() {
                 </div>
                 {reportError && <div className="error-banner">{reportError}</div>}
                 {reportMessage && <div className="success-banner">{reportMessage}</div>}
+                {!canManageReports && mayAskForReports && <div className="inline-form"><span className="field-hint">Your profile can view report entries but not change them.</span><button className="secondary-button" type="button" onClick={() => changes.requestChange('create', null)}>Request report access</button></div>}
                 {canManageReports && <form className="inline-form" onSubmit={saveReport}>
                     <input type="month" value={reportForm.month} onChange={setReportField('month')} required aria-label="Month" />
                     <select value={reportForm.branchId} onChange={setReportField('branchId')} required aria-label="Branch">
@@ -341,13 +353,17 @@ export function AnalyticsPage() {
                     summary={reportSummary}
                     exportTitle={reportExportTitle}
                     onExportReady={exportRef}
-                    onEdit={canManageReports ? editReport : undefined}
-                    onDelete={canManageReports ? removeReport : undefined}
+                    onEdit={editReport}
+                    onDelete={removeReport}
+                    permissions={tablePermissions(user, 'monthlyReports')}
+                    onRequest={changes.requestChange}
                 />
             </section>
         ) : (
             <section className="panel insight-panel"><h2>Transaction mix</h2><div className="bar-track"><span className="income-bar" style={{ width: `${income + expense ? income / (income + expense) * 100 : 0}%` }} /></div><p className="subheading">Income versus expenses across your recorded transactions.</p></section>
         )}
+        {changes.notice}
+        {changes.modal}
     </div>;
 }
 
@@ -359,6 +375,13 @@ export function BudgetsPage() {
     const [transactions, setTransactions] = useState([]);
 
     const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
+
+    // Budget edits follow the granular `budgets` right: staff ask, the owner
+    // approves through the Requests page (see components/RequestApproval).
+    const user = useStoredUser();
+    const mayEditBudget = canEdit(user, 'budgets');
+    const mayAskForBudget = canRequest(user, 'budgets', 'create');
+    const changes = useChangeRequest('budgets');
 
     useEffect(() => {
         api.transactions.list().then(setTransactions).catch(() => { });
@@ -396,13 +419,14 @@ export function BudgetsPage() {
             }
             setTimeout(() => setMessage(''), 3000);
         } catch (error) {
+            if (changes.onRequestError(error, saved, saved ? 'edit' : 'create')) return;
             setMessage(error.message);
         } finally {
             setLoading(false);
         }
     };
 
-    return <div className="resource-page"><p className="eyebrow">Planning</p><h1>Budgets</h1><p className="subheading">Set a monthly spending target and keep it visible.</p>{message && <div className="success-banner">{message}</div>}<section className="panel budget-panel"><h2>Monthly expense budget</h2><form className="inline-form" onSubmit={handleSubmit}><input type="number" min="0" step="0.01" value={budget} onChange={(event) => setBudget(event.target.value)} placeholder="Enter budget amount" required /><button className="primary-button" disabled={loading}>{loading ? 'Saving...' : 'Save budget'}</button></form>{saved !== null && <><p className="budget-result">Your monthly budget is {money(saved.amount)}.</p><div className={`achievement-card ${budgetDifference >= 0 ? 'positive' : 'negative'}`}>{budgetDifference >= 0 ? `Under budget by ${money(budgetDifference)}` : `Over budget by ${money(Math.abs(budgetDifference))}`}</div></>}</section></div>;
+    return <div className="resource-page"><p className="eyebrow">Planning</p><h1>Budgets</h1><p className="subheading">Set a monthly spending target and keep it visible.</p>{message && <div className="success-banner">{message}</div>}<section className="panel budget-panel"><h2>Monthly expense budget</h2>{mayEditBudget ? <form className="inline-form" onSubmit={handleSubmit}><input type="number" min="0" step="0.01" value={budget} onChange={(event) => setBudget(event.target.value)} placeholder="Enter budget amount" required /><button className="primary-button" disabled={loading}>{loading ? 'Saving...' : 'Save budget'}</button></form> : mayAskForBudget && <div className="inline-form"><span className="field-hint">Your profile can view budgets but not change them.</span><button className="secondary-button" type="button" onClick={() => changes.requestChange(saved ? 'edit' : 'create', saved)}>Request budget access</button></div>}{saved !== null && <><p className="budget-result">Your monthly budget is {money(saved.amount)}.</p><div className={`achievement-card ${budgetDifference >= 0 ? 'positive' : 'negative'}`}>{budgetDifference >= 0 ? `Under budget by ${money(budgetDifference)}` : `Over budget by ${money(Math.abs(budgetDifference))}`}</div></>}</section>{changes.notice}{changes.modal}</div>;
 }
 
 export function TargetPage() {
@@ -413,6 +437,12 @@ export function TargetPage() {
     const [transactions, setTransactions] = useState([]);
 
     const currentMonth = new Date().toISOString().slice(0, 7);
+
+    // Target edits follow the granular `targets` right (see the budget page).
+    const user = useStoredUser();
+    const mayEditTarget = canEdit(user, 'targets');
+    const mayAskForTarget = canRequest(user, 'targets', 'create');
+    const changes = useChangeRequest('targets');
 
     useEffect(() => {
         api.transactions.list().then(setTransactions).catch(() => { });
@@ -450,13 +480,14 @@ export function TargetPage() {
             }
             setTimeout(() => setMessage(''), 3000);
         } catch (error) {
+            if (changes.onRequestError(error, saved, saved ? 'edit' : 'create')) return;
             setMessage(error.message);
         } finally {
             setLoading(false);
         }
     };
 
-    return <div className="resource-page"><p className="eyebrow">Planning</p><h1>Target</h1><p className="subheading">Set a monthly income target to guide your savings and growth.</p>{message && <div className="success-banner">{message}</div>}<section className="panel budget-panel"><h2>Monthly income target</h2><form className="inline-form" onSubmit={handleSubmit}><input type="number" min="0" step="0.01" value={target} onChange={(event) => setTarget(event.target.value)} placeholder="Enter target amount" required /><button className="primary-button" disabled={loading}>{loading ? 'Saving...' : 'Save target'}</button></form>{saved !== null && <><p className="budget-result">Your monthly income target is {money(saved.amount)}.</p><div className={`achievement-card ${targetDifference >= 0 ? 'positive' : 'negative'}`}>{targetDifference >= 0 ? `Achieved target + ${money(targetDifference)}` : `Remaining ${money(Math.abs(targetDifference))} to reach target`}</div></>}</section></div>;
+    return <div className="resource-page"><p className="eyebrow">Planning</p><h1>Target</h1><p className="subheading">Set a monthly income target to guide your savings and growth.</p>{message && <div className="success-banner">{message}</div>}<section className="panel budget-panel"><h2>Monthly income target</h2>{mayEditTarget ? <form className="inline-form" onSubmit={handleSubmit}><input type="number" min="0" step="0.01" value={target} onChange={(event) => setTarget(event.target.value)} placeholder="Enter target amount" required /><button className="primary-button" disabled={loading}>{loading ? 'Saving...' : 'Save target'}</button></form> : mayAskForTarget && <div className="inline-form"><span className="field-hint">Your profile can view the target but not change it.</span><button className="secondary-button" type="button" onClick={() => changes.requestChange(saved ? 'edit' : 'create', saved)}>Request target access</button></div>}{saved !== null && <><p className="budget-result">Your monthly income target is {money(saved.amount)}.</p><div className={`achievement-card ${targetDifference >= 0 ? 'positive' : 'negative'}`}>{targetDifference >= 0 ? `Achieved target + ${money(targetDifference)}` : `Remaining ${money(Math.abs(targetDifference))} to reach target`}</div></>}</section>{changes.notice}{changes.modal}</div>;
 }
 
 export function PlansPage() {

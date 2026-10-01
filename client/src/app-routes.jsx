@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import App from './App';
 import { ActivityLogsPage, BankAccountsPage, BranchesPage, KeepNotesPage, MastersPage, StaffPage, SubscriptionsPage, TransactionsPage, UpiAccountsPage, UsersPage } from './pages';
+import ApprovalsPage from './components/ApprovalsPage';
 import { Sidebar } from './components/Sidebar';
 import TopNavbar from './components/TopNavbar';
 import { AnalyticsPage, BudgetsPage, LoginPage, PlansPage, TargetPage } from './publicPages';
 import { api } from './services/api';
+import { refreshPermissions } from './utils/permissions';
 import { getStoredUser, isBusinessUser, isSuperAdmin as isSuperAdminRole } from './utils/roles';
 
 function getCurrentUser() {
@@ -34,6 +36,11 @@ function PageLayout({ children }) {
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('fintrack_theme', theme);
     }, [theme]);
+
+    // Re-read the profile on every page load: a decision made while this user was
+    // on another screen (an approved request hands out a short-lived grant) has to
+    // be in force before they click anything - see refreshPermissions.
+    useEffect(() => { if (isBusinessUser(user)) refreshPermissions(); }, []);
 
     return <div className="app-shell">{mobileMenuOpen && <div className="mobile-backdrop" onClick={() => setMobileMenuOpen(false)} />}<Sidebar mobileMenuOpen={mobileMenuOpen} onCloseMobileMenu={() => setMobileMenuOpen(false)} /><main className="main-content"><TopNavbar mobileMenuOpen={mobileMenuOpen} onToggleMobileMenu={() => setMobileMenuOpen((value) => !value)} profileMenuOpen={profileMenuOpen} onToggleProfileMenu={() => setProfileMenuOpen((value) => !value)} onToggleTheme={() => setTheme((value) => value === 'light' ? 'dark' : 'light')} searchOpen={searchOpen} searchQuery={searchQuery} onSearchChange={(event) => setSearchQuery(event.target.value)} onToggleSearch={() => setSearchOpen((value) => !value)} branches={branches} selectedBranchId={selectedBranchId} onBranchChange={selectBranch} />{children}</main></div>;
 }
@@ -73,6 +80,8 @@ export default function AppRoutes() {
         <Route path="/upi-accounts" element={isAuthenticated ? <PageLayout><BusinessGuard><UpiAccountsPage /></BusinessGuard></PageLayout> : <Navigate to="/login" replace />} />
         <Route path="/staff" element={isAuthenticated ? <PageLayout><BusinessGuard><StaffPage /></BusinessGuard></PageLayout> : <Navigate to="/login" replace />} />
         <Route path="/activity-logs" element={isAuthenticated ? <PageLayout><BusinessGuard><ActivityLogsPage /></BusinessGuard></PageLayout> : <Navigate to="/login" replace />} />
+        {/* Approval workflow: staff file requests, the owner decides them. */}
+        <Route path="/approvals" element={isAuthenticated ? <PageLayout><BusinessGuard><ApprovalsPage /></BusinessGuard></PageLayout> : <Navigate to="/login" replace />} />
         <Route path="/plans" element={<PlansPage />} />
         <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />} />
         {superAdmin && (

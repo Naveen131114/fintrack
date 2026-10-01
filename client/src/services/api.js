@@ -82,6 +82,10 @@ async function request(path, options = {}) {
                 const body = await retryResponse.json().catch(() => ({}));
                 const error = new Error(body.message || 'Request failed');
                 error.status = retryResponse.status;
+                // A permission guard may return a requestable 403 - keep the code
+                // and the { action, module } it named so the UI can offer a request.
+                error.code = body.code;
+                error.permission = body.permission;
                 throw error;
             }
             return retryResponse.status === 204 ? null : retryResponse.json();
@@ -99,6 +103,8 @@ async function request(path, options = {}) {
         const body = await response.json().catch(() => ({}));
         const error = new Error(body.message || 'Request failed');
         error.status = response.status;
+        error.code = body.code;
+        error.permission = body.permission;
         throw error;
     }
 
@@ -148,6 +154,28 @@ export const api = {
     reports: { list: (branchId) => request(`/reports${branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''}`), create: (data) => request('/reports', { method: 'POST', body: JSON.stringify(data) }), remove: (id) => request(`/reports/${id}`, { method: 'DELETE' }) },
     users: { list: () => request('/users'), create: (data) => request('/users', { method: 'POST', body: JSON.stringify(data) }), update: (id, data) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }), remove: (id) => request(`/users/${id}`, { method: 'DELETE' }) },
     subscriptions: { list: () => request('/subscriptions'), create: (data) => request('/subscriptions', { method: 'POST', body: JSON.stringify(data) }), update: (id, data) => request(`/subscriptions/${id}`, { method: 'PUT', body: JSON.stringify(data) }), remove: (id) => request(`/subscriptions/${id}`, { method: 'DELETE' }) },
+    // "Request approval" workflow: staff ask, owners (or staff who already hold
+    // the right) decide. scope: 'mine' lists the requester's own history.
+    requests: {
+        list: (params = {}) => {
+            const query = new URLSearchParams();
+            if (params.scope) query.set('scope', params.scope);
+            if (params.status) query.set('status', params.status);
+            const suffix = query.toString() ? `?${query.toString()}` : '';
+            return request(`/requests${suffix}`);
+        },
+        counts: () => request('/requests/counts'),
+        create: (data) => request('/requests', { method: 'POST', body: JSON.stringify(data) }),
+        approve: (id, data = {}) => request(`/requests/${id}/approve`, { method: 'POST', body: JSON.stringify(data) }),
+        reject: (id, data = {}) => request(`/requests/${id}/reject`, { method: 'POST', body: JSON.stringify(data) }),
+        cancel: (id) => request(`/requests/${id}`, { method: 'DELETE' })
+    },
+    // Notification bell: approval requests, decisions, and general notices.
+    notifications: {
+        list: () => request('/notifications'),
+        markRead: (ids) => request('/notifications/read', { method: 'POST', body: JSON.stringify(ids ? { ids } : {}) }),
+        remove: (id) => request(`/notifications/${id}`, { method: 'DELETE' })
+    },
     public: {
         plans: () => request('/public/plans'),
         requestSubscription: (data) => request('/public/subscription-requests', { method: 'POST', body: JSON.stringify(data) }),

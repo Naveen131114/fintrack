@@ -6,7 +6,7 @@ import ActivityLog from '../models/ActivityLog.js';
 import Subscription from '../models/Subscription.js';
 import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
-import User from '../models/User.js';
+import User, { permissionsForLevel, resolvePermissions } from '../models/User.js';
 import { ownerIdFor } from '../middleware/businessAccess.js';
 
 // allowedBranches must always be an array of Branch ObjectIds.
@@ -29,6 +29,45 @@ function normalizeBranchIds(value) {
 }
 
 const resources = { branches: Branch, bankAccounts: BankAccount, upiAccounts: UpiAccount };
+
+// Granular staff rights.
+// ---------------------------------------------------------------------------
+// The staff form posts `permissions: { view, create, edit, delete, manageBusiness }`
+// (flat `canView`/`canCreate`/... keys are accepted as well so API clients have a
+// second, obvious spelling). `permissionLevel` is still stored beside the flags to
+// keep older clients and exports working - see the User model.
+const PERMISSION_FIELDS = { view: 'canView', create: 'canCreate', edit: 'canEdit', delete: 'canDelete', manageBusiness: 'canManageBusiness' };
+export function permissionsFromBody(body = {}) {
+    const source = body.permissions && typeof body.permissions === 'object' ? body.permissions : body;
+    const permissions = {};
+    let configured = false;
+    Object.entries(PERMISSION_FIELDS).forEach(([key, field]) => {
+        const value = source[key] !== undefined ? source[key] : body[field];
+        if (value === undefined) return;
+        permissions[key] = value === true || value === 'true';
+        configured = true;
+    });
+    return configured ? permissions : null;
+}
+function fieldsFor(permissions) {
+    const fields = { permissionsConfigured: true };
+    Object.entries(PERMISSION_FIELDS).forEach(([key, field]) => { fields[field] = permissions[key] === true; });
+    return fields;
+}
+// Legacy preset -> the flags it implies. Needed because staff updates go through
+// findOneAndUpdate, which does not run the schema hooks that keep both in step.
+function levelFields(level) {
+    const derived = permissionsForLevel(level);
+    return fieldsFor({ view: derived.view, create: derived.create, edit: derived.edit, delete: derived.delete, manageBusiness: derived.manageBusiness });
+}
+// Reverse of levelFields: when the owner ticks boxes by hand, `permissionLevel`
+// still gets a value that means roughly the same thing for anything reading it.
+function levelFor(permissions = {}) {
+    if (permissions.delete) return 'full';
+    if (permissions.create || permissions.edit) return 'edit';
+    return 'view';
+}
+
 const ifsc = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const upi = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z]{2,64}$/;
 async function planFor(owner) { return owner.subscriptionPlan ? Subscription.findOne({ planName: owner.subscriptionPlan, status: 'active' }) : null; }
@@ -50,7 +89,7 @@ export async function listResource(req, res, next) {
 export async function createResource(req, res, next) { try { const Model = resources[req.params.resource]; const ownerId = ownerIdFor(req.user); if (req.params.resource === 'branches') await checkLimit(ownerId, Branch, 'maxBranches', 'branches'); if (req.params.resource === 'bankAccounts' && (!/^\d{6,24}$/.test(String(req.body.accountNumber || '')) || !ifsc.test(String(req.body.ifscCode || '').toUpperCase()))) return res.status(400).json({ message: 'Enter a valid account number and IFSC code' }); if (req.params.resource === 'upiAccounts' && !upi.test(String(req.body.upiId || ''))) return res.status(400).json({ message: 'Enter a valid UPI ID' }); res.status(201).json(await Model.create({ ...req.body, businessOwnerId: ownerId })); } catch (e) { next(e); } }
 export async function updateResource(req, res, next) { try { const Model = resources[req.params.resource]; const item = await Model.findOneAndUpdate({ _id: req.params.id, businessOwnerId: ownerIdFor(req.user) }, req.body, { new: true, runValidators: true }); if (!item) return res.status(404).json({ message: 'Record not found' }); res.json(item); } catch (e) { next(e); } }
 export async function removeResource(req, res, next) { try { const Model = resources[req.params.resource]; const filter = { _id: req.params.id, businessOwnerId: ownerIdFor(req.user) }; if (req.params.resource === 'branches' && await Transaction.exists({ branchId: req.params.id })) return res.status(409).json({ message: 'This branch has transactions and cannot be deleted. Deactivate it instead.' }); const item = await Model.findOneAndDelete(filter); if (!item) return res.status(404).json({ message: 'Record not found' }); res.status(204).end(); } catch (e) { next(e); } }
-export async function listStaff(req, res, next) { try { const staff = await User.find({ businessOwnerId: ownerIdFor(req.user), role: 'business_staff' }).populate('allowedBranches', 'branchName status').select('-password -refreshToken').sort({ createdAt: -1 }); res.json(staff); } catch (e) { next(e); } }
+export async function listStaff(req, res, next) { try { const staff = await User.find({ businessOwnerId: ownerIdFor(req.user), role: 'business_staff' }).populate('allowedBranches', 'branchName status').select('-password -refreshToken').sort({ createdAt: -1 }); res.json(staff.map((member) => ({ ...member.toObject(), permissions: resolvePermissions(member) }))); } catch (e) { next(e); } }
 export async function createStaff(req, res, next) {
     try {
         if (req.user.role !== 'business_owner') return res.status(403).json({ message: 'Only a business owner can manage staff' });
@@ -59,7 +98,11 @@ export async function createStaff(req, res, next) {
         await checkLimit(ownerId, User, 'maxStaff', 'staff');
         const { name, userName, emailId, password, phoneNumber, permissionLevel, subscriptionPlan } = req.body;
         const branchIds = normalizeBranchIds(req.body.allowedBranches);
-        if (!name || !userName || !emailId || !password || !['view', 'edit', 'full'].includes(permissionLevel)) return res.status(400).json({ message: 'Name, username, email, password and permission level are required' });
+        const permissions = permissionsFromBody(req.body);
+        if (!name || !userName || !emailId || !password) return res.status(400).json({ message: 'Name, username, email and password are required' });
+        if (permissionLevel !== undefined && !['view', 'edit', 'full'].includes(permissionLevel)) return res.status(400).json({ message: 'Invalid permission level' });
+        // Rights can arrive as granular checkboxes, as the legacy level, or both.
+        if (!permissions && !permissionLevel) return res.status(400).json({ message: 'Choose what this staff member is allowed to do' });
         if (!branchIds || !branchIds.length) return res.status(400).json({ message: 'Select at least one branch for this staff member' });
         if (!branchIds.every((id) => mongoose.isValidObjectId(id))) return res.status(400).json({ message: 'One or more selected branches are invalid' });
         const branches = await Branch.countDocuments({ _id: { $in: branchIds }, businessOwnerId: ownerId, status: 'active' });
@@ -72,7 +115,11 @@ export async function createStaff(req, res, next) {
         // Subscription dates are always inherited from the business owner's plan.
         const startDate = owner.subscriptionStartDate;
         const endDate = owner.subscriptionEndDate;
-        const staffUser = await User.create({ name, userName, emailId: String(emailId).toLowerCase(), password: await bcrypt.hash(password, 10), phoneNumber, role: 'business_staff', businessOwnerId: ownerId, permissionLevel, allowedBranches: branchIds, approvalStatus: 'approved', subscriptionPlan: staffPlan || undefined, subscriptionStartDate: startDate || undefined, subscriptionEndDate: endDate || undefined });
+        // Built through the model rather than User.create so the granular flags
+        // and the level-to-flags sync both run on this single save.
+        const staffUser = new User({ name, userName, emailId: String(emailId).toLowerCase(), password: await bcrypt.hash(password, 10), phoneNumber, role: 'business_staff', businessOwnerId: ownerId, permissionLevel: permissions ? levelFor(permissions) : permissionLevel, allowedBranches: branchIds, approvalStatus: 'approved', subscriptionPlan: staffPlan || undefined, subscriptionStartDate: startDate || undefined, subscriptionEndDate: endDate || undefined });
+        if (permissions) staffUser.setGranularPermissions(permissions);
+        await staffUser.save();
         try {
             await ActivityLog.create({ businessOwnerId: ownerId, staffUserId: staffUser._id, action: 'create_staff', module: 'staff', recordId: staffUser._id, description: `${req.user.userName} added staff member ${staffUser.name || staffUser.userName}` });
         } catch { }
@@ -81,14 +128,18 @@ export async function createStaff(req, res, next) {
 }
 export async function updateStaff(req, res, next) {
     try {
-        if (req.user.role !== 'business_owner') return res.status(403).json({ message: 'Only a business owner can manage staff' }); const ownerId = ownerIdFor(req.user); const owner = await User.findById(ownerId); const update = {}; const { name, userName, emailId, phoneNumber, permissionLevel, password, status, subscriptionPlan } = req.body; if (name !== undefined) update.name = name; if (userName !== undefined) update.userName = userName; if (emailId !== undefined) update.emailId = String(emailId).toLowerCase(); if (phoneNumber !== undefined) update.phoneNumber = phoneNumber; if (status !== undefined) { if (!['active', 'inactive'].includes(status)) return res.status(400).json({ message: 'Invalid status' }); update.status = status; } if (permissionLevel !== undefined) { if (!['view', 'edit', 'full'].includes(permissionLevel)) return res.status(400).json({ message: 'Invalid permission level' }); update.permissionLevel = permissionLevel; } if (password) update.password = await bcrypt.hash(String(password), 10);
+        if (req.user.role !== 'business_owner') return res.status(403).json({ message: 'Only a business owner can manage staff' }); const ownerId = ownerIdFor(req.user); const owner = await User.findById(ownerId); const update = {}; const { name, userName, emailId, phoneNumber, permissionLevel, password, status, subscriptionPlan } = req.body; if (name !== undefined) update.name = name; if (userName !== undefined) update.userName = userName; if (emailId !== undefined) update.emailId = String(emailId).toLowerCase(); if (phoneNumber !== undefined) update.phoneNumber = phoneNumber; if (status !== undefined) { if (!['active', 'inactive'].includes(status)) return res.status(400).json({ message: 'Invalid status' }); update.status = status; } if (permissionLevel !== undefined) { if (!['view', 'edit', 'full'].includes(permissionLevel)) return res.status(400).json({ message: 'Invalid permission level' }); update.permissionLevel = permissionLevel; Object.assign(update, levelFields(permissionLevel)); } if (password) update.password = await bcrypt.hash(String(password), 10);
         if (subscriptionPlan !== undefined) {
             const planName = String(subscriptionPlan || '').trim();
             if (planName) { const ok = await Subscription.findOne({ planName, planType: 'business', status: 'active' }); if (!ok) return res.status(400).json({ message: 'Selected subscription plan is not a valid business plan' }); update.subscriptionPlan = planName; } else { update.subscriptionPlan = undefined; }
         }
         if (req.body.subscriptionStartDate !== undefined) { const d = req.body.subscriptionStartDate ? new Date(req.body.subscriptionStartDate) : null; update.subscriptionStartDate = Number.isNaN(d?.getTime()) ? undefined : d; }
         if (req.body.subscriptionEndDate !== undefined) { const d = req.body.subscriptionEndDate ? new Date(req.body.subscriptionEndDate) : null; update.subscriptionEndDate = Number.isNaN(d?.getTime()) ? undefined : d; }
-        if (req.body.allowedBranches !== undefined) { const branchIds = normalizeBranchIds(req.body.allowedBranches); if (!branchIds || !branchIds.length) return res.status(400).json({ message: 'Select at least one branch for this staff member' }); if (!branchIds.every((id) => mongoose.isValidObjectId(id))) return res.status(400).json({ message: 'One or more selected branches are invalid' }); const count = await Branch.countDocuments({ _id: { $in: branchIds }, businessOwnerId: ownerId, status: 'active' }); if (count !== branchIds.length) return res.status(400).json({ message: 'One or more selected branches are invalid' }); update.allowedBranches = branchIds; } const staff = await User.findOneAndUpdate({ _id: req.params.id, businessOwnerId: ownerId, role: 'business_staff' }, update, { new: true, runValidators: true }).select('-password -refreshToken'); if (!staff) return res.status(404).json({ message: 'Staff member not found' }); res.json(staff);
+        if (req.body.allowedBranches !== undefined) { const branchIds = normalizeBranchIds(req.body.allowedBranches); if (!branchIds || !branchIds.length) return res.status(400).json({ message: 'Select at least one branch for this staff member' }); if (!branchIds.every((id) => mongoose.isValidObjectId(id))) return res.status(400).json({ message: 'One or more selected branches are invalid' }); const count = await Branch.countDocuments({ _id: { $in: branchIds }, businessOwnerId: ownerId, status: 'active' }); if (count !== branchIds.length) return res.status(400).json({ message: 'One or more selected branches are invalid' }); update.allowedBranches = branchIds; }
+        // Explicit checkboxes always win over the legacy preset above.
+            const explicitPermissions = permissionsFromBody(req.body);
+            if (explicitPermissions) Object.assign(update, fieldsFor(explicitPermissions));
+            const staff = await User.findOneAndUpdate({ _id: req.params.id, businessOwnerId: ownerId, role: 'business_staff' }, update, { new: true, runValidators: true }).select('-password -refreshToken'); if (!staff) return res.status(404).json({ message: 'Staff member not found' }); res.json({ ...staff.toObject(), permissions: resolvePermissions(staff) });
     } catch (e) { next(e); }
 }
 export async function activityLogs(req, res, next) { try { res.json(await ActivityLog.find({ businessOwnerId: ownerIdFor(req.user) }).populate('staffUserId', 'name userName').sort({ createdAt: -1 })); } catch (e) { next(e); } }

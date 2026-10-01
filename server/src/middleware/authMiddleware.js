@@ -25,6 +25,16 @@ export async function authenticateToken(req, res, next) {
             role: user.role,
             businessOwnerId: user.businessOwnerId,
             permissionLevel: user.permissionLevel,
+            // Read straight from the database on every request, so a permission
+            // change - or an approval grant that just expired - takes effect
+            // immediately instead of waiting for the access token to be renewed.
+            canView: user.canView === true,
+            canCreate: user.canCreate === true,
+            canEdit: user.canEdit === true,
+            canDelete: user.canDelete === true,
+            canManageBusiness: user.canManageBusiness === true,
+            permissionsConfigured: user.permissionsConfigured === true,
+            permissionsGrant: user.permissionsGrant || [],
             allowedBranches: user.allowedBranches || [],
             status: user.status,
             approvalStatus: user.approvalStatus,

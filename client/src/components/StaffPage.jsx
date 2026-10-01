@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import DataTable from './DataTable';
 import AlertDialog from './AlertDialog';
 import { getStoredUser } from '../utils/roles';
+import { PERMISSION_FLAG_LABELS, flagsForLevel, permissionFlagsForForm, permissionSummary, permissionsPayload } from '../utils/permissions';
 
 const EMPTY = {
     name: '',
@@ -11,7 +12,9 @@ const EMPTY = {
     password: '',
     phoneNumber: '',
     permissionLevel: 'view',
-    branchIds: []
+    branchIds: [],
+    // Granular flags - the same set the server stores (see utils/permissions).
+    ...flagsForLevel('view')
 };
 const OBJECT_ID = /^[a-fA-F0-9]{24}$/;
 
@@ -43,6 +46,10 @@ export default function StaffPage() {
     };
 
     const toggleBranch = (id) => setForm((p) => ({ ...p, branchIds: p.branchIds.includes(id) ? p.branchIds.filter((b) => b !== id) : [...p.branchIds, id] }));
+    // The level select is a preset: picking one fills the checkboxes in, and the
+    // checkboxes are what is actually saved (see permissionsPayload).
+    const changeLevel = (level) => setForm((current) => ({ ...current, permissionLevel: level, ...flagsForLevel(level) }));
+    const toggleFlag = (key) => setForm((current) => ({ ...current, [key]: !current[key] }));
     const startAdd = () => { setEditing(null); setForm(EMPTY); setOpen(true); loadBranches(); };
     const startEdit = (row) => {
         setEditing(row);
@@ -53,6 +60,9 @@ export default function StaffPage() {
             password: '',
             phoneNumber: row.phoneNumber || '',
             permissionLevel: row.permissionLevel || 'view',
+            // An approved request may have widened this account, so the ticks come
+            // from the effective rights rather than the stored preset.
+            ...permissionFlagsForForm(row),
             branchIds: (row.allowedBranches || []).map((branch) => String(branch?._id ?? branch))
         });
         setOpen(true); loadBranches();
@@ -71,7 +81,7 @@ export default function StaffPage() {
                 userName: form.userName.trim(),
                 emailId: form.emailId.trim(),
                 phoneNumber: form.phoneNumber.trim(),
-                permissionLevel: form.permissionLevel,
+                ...permissionsPayload(form),
                 allowedBranches: branchIds
             };
             if (!editing || form.password) payload.password = form.password;
@@ -105,7 +115,7 @@ export default function StaffPage() {
         { key: 'userName', label: 'Username' },
         { key: 'emailId', label: 'Email' },
         { key: 'phoneNumber', label: 'Phone' },
-        { key: 'permissionLevel', label: 'Permission' },
+        { key: 'permissions', label: 'Access', render: (row) => permissionSummary(row) },
         { key: 'allowedBranches', label: 'Branches', render: (row) => (row.allowedBranches || []).map((b) => b?.branchName || b).filter(Boolean).join(', ') || '-' },
         // Subscription details are inherited from owner's plan by the server,
         // but show them here with fallback to owner dates.
@@ -140,11 +150,21 @@ export default function StaffPage() {
                     <label>Email<input type="email" value={form.emailId} onChange={(ev) => setForm({ ...form, emailId: ev.target.value })} required /></label>
                     <label>Password {editing && '(keep blank)'}<input type="password" value={form.password} onChange={(ev) => setForm({ ...form, password: ev.target.value })} required={!editing} /></label>
                     <label>Phone number<input value={form.phoneNumber} onChange={(ev) => setForm({ ...form, phoneNumber: ev.target.value })} /></label>
-                    <label>Permission level<select value={form.permissionLevel} onChange={(ev) => setForm({ ...form, permissionLevel: ev.target.value })} required>
+                    <label>Permission level<select value={form.permissionLevel} onChange={(ev) => changeLevel(ev.target.value)} required>
                         <option value="view">View</option>
                         <option value="edit">Edit</option>
                         <option value="full">Full</option>
-                    </select></label>
+                    </select><small className="field-hint">Preset - adjust the boxes below for finer control</small></label>
+                    <div className="full-width">
+                        <p className="field-label">What this staff login may do</p>
+                        <div className="permission-grid">
+                            {PERMISSION_FLAG_LABELS.map(({ key, label, hint }) => <label key={key} className="checkbox-row" title={hint || ''}>
+                                <input type="checkbox" checked={!!form[key]} disabled={!form.canView} onChange={() => toggleFlag(key)} />
+                                <span>{label}{hint && <small className="field-hint">{hint}</small>}</span>
+                            </label>)}
+                        </div>
+                        <small className="field-hint">Anything a staff login cannot do can be requested from the Requests page and approved by you for a short time.</small>
+                    </div>
                     <div className="readonly-info full-width">
                         <p>Subscription dates are taken automatically from your business subscription plan.</p>
                         {ownerStartDate && <p>Start date: {new Date(ownerStartDate).toLocaleDateString('en-IN')}</p>}
