@@ -52,7 +52,7 @@ export async function saveReport(req, res, next) {
         const payload = parseReport(req.body || {});
         const userId = dataOwnerIdFor(req.user);
         // The branch must belong to this business (staff cannot reach here:
-        // the route is guarded by requireDataWrite).
+        // the route is guarded by requirePermission('create', 'monthlyReports')).
         if (payload.branchId) await assertBranchAccess(req.user, payload.branchId);
         const existing = await MonthlyReport.findOne({ userId, month: payload.month, branchId: payload.branchId });
         if (existing) {

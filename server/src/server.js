@@ -18,6 +18,8 @@ import noteRoutes from './routes/noteRoutes.js';
 import monthlyReportRoutes from './routes/monthlyReportRoutes.js';
 import MonthlyReport from './models/MonthlyReport.js';
 import businessRoutes from './routes/businessRoutes.js';
+import changeRequestRoutes from './routes/changeRequestRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 
 const app = express();
 app.use(cors());
@@ -32,6 +34,9 @@ app.use('/api/targets', authenticateToken, targetRoutes);
 app.use('/api/notes', authenticateToken, noteRoutes);
 app.use('/api/reports', authenticateToken, monthlyReportRoutes);
 app.use('/api/business', authenticateToken, businessRoutes);
+// Approval workflow and the notification bell.
+app.use('/api/requests', authenticateToken, changeRequestRoutes);
+app.use('/api/notifications', authenticateToken, notificationRoutes);
 app.use('/api/users', authenticateToken, resourceRoutes(User, { superAdmin: true, middleware: requireSuperAdmin, isUserModel: true }));
 app.use('/api/subscriptions', authenticateToken, resourceRoutes(Subscription, { superAdmin: true, middleware: requireSuperAdmin }));
 app.use('/api/public', publicRoutes);

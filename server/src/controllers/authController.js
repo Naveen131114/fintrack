@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import User from '../models/User.js';
+import User, { resolvePermissions } from '../models/User.js';
 import { createTokenPair, verifyRefreshToken } from '../utils/tokens.js';
 import { isSuperAdminIdentity } from '../config/superAdmin.js';
 
@@ -33,6 +33,14 @@ function serializeUser(user) {
         role: user.role,
         businessOwnerId: user.businessOwnerId,
         permissionLevel: user.permissionLevel,
+        // Granular flags + the effective view of them (legacy level included)
+        // the client switches its buttons on.
+        canView: user.canView === true,
+        canCreate: user.canCreate === true,
+        canEdit: user.canEdit === true,
+        canDelete: user.canDelete === true,
+        canManageBusiness: user.canManageBusiness === true,
+        permissions: resolvePermissions(user),
         allowedBranches: user.allowedBranches || [],
         status: user.status,
         subscriptionPlan: user.subscriptionPlan,
@@ -114,6 +122,16 @@ export async function login(req, res, next) {
         const endDate = user.subscriptionEndDate ? new Date(user.subscriptionEndDate) : null;
         if (!isOwner && endDate && endDate < new Date()) {
             return res.status(403).json({ message: 'Your subscription has expired. Please renew your plan.' });
+        }
+
+        // Approval grants are checked live, but prune the ones that ran out so
+        // the stored profile stays small and the staff list shows the truth.
+        if ((user.permissionsGrant || []).length) {
+            const activeGrants = user.permissionsGrant.filter((grant) => grant.expiresAt && grant.expiresAt > new Date());
+            if (activeGrants.length !== user.permissionsGrant.length) {
+                user.permissionsGrant = activeGrants;
+                await user.save();
+            }
         }
 
         const tokens = createTokenPair(user);

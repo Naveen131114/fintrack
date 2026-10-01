@@ -1754,3 +1754,387 @@ nav {
         justify-content: center;
     }
 }
+
+/* ---------------------------------------------------------------------------
+   Approval workflow: notification bell, request dialogs and request cards
+   --------------------------------------------------------------------------- */
+
+/* Notification bell (TopNavbar) */
+.notification-wrap {
+    position: relative;
+}
+
+.notification-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--coral);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.notification-panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 10px);
+    width: min(330px, 86vw);
+    max-height: 380px;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 18px 32px var(--shadow);
+    z-index: 40;
+}
+
+.notification-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+}
+
+.notification-mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: transparent;
+    color: var(--green);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.notification-error,
+.notification-empty {
+    margin: 0;
+    padding: 14px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.notification-error {
+    color: var(--coral);
+}
+
+.notification-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.notification-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+}
+
+.notification-list li:last-child {
+    border-bottom: 0;
+}
+
+.notification-list li.unread {
+    background: var(--mint);
+}
+
+.notification-item {
+    flex: 1;
+    display: grid;
+    gap: 3px;
+    text-align: left;
+    background: transparent;
+    color: var(--ink);
+}
+
+.notification-item strong {
+    font-size: 12px;
+}
+
+.notification-item span {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.notification-item time {
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.notification-remove {
+    color: var(--muted);
+}
+
+.notification-remove:hover {
+    color: var(--coral);
+}
+
+/* Requests page tabs */
+.approvals-filters {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 0 0 16px;
+}
+
+.approvals-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.tab-button {
+    background: var(--surface);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.tab-button:hover {
+    color: var(--green);
+    border-color: #b9dccc;
+}
+
+.tab-button.active {
+    background: var(--mint);
+    color: var(--green);
+    border-color: #b9dccc;
+}
+
+/* Request cards - the Approvals page and the legacy "pending approval" list */
+.approval-list,
+.approvals-list {
+    display: grid;
+    gap: 12px;
+}
+
+.approvals-empty {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.approval-card {
+    display: grid;
+    gap: 10px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel-alt);
+}
+
+.approval-card>header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.approval-card strong {
+    font-size: 13px;
+}
+
+.approval-card p {
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.approval-record {
+    color: var(--ink) !important;
+    font-weight: 600;
+}
+
+.approval-reason {
+    margin: 0;
+    color: var(--ink);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.approval-meta {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.approval-meta span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.approval-actions {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-wrap: wrap;
+}
+
+.approval-actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Status pill on a request card (plan-badge carries the shape) */
+.plan-badge.status-pending {
+    background: var(--peach);
+    color: var(--coral);
+}
+
+.plan-badge.status-approved {
+    background: var(--mint);
+    color: var(--green);
+}
+
+.plan-badge.status-rejected {
+    background: #fbe9e5;
+    color: #a13f32;
+}
+
+/* "Request approval" row buttons in a table */
+.table-icon.request {
+    color: var(--green);
+    border-color: #b9dccc;
+    background: var(--mint);
+}
+
+.table-icon.request:hover {
+    border-color: var(--green);
+}
+
+.table-icon.request.delete-request {
+    color: var(--coral);
+    border-color: #f1cfc3;
+    background: var(--peach);
+}
+
+.table-icon.request.delete-request:hover {
+    border-color: var(--coral);
+}
+
+/* Request dialog */
+.request-summary {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-alt);
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.request-summary svg {
+    flex: 0 0 auto;
+    margin-top: 2px;
+    color: var(--green);
+}
+
+.request-summary p {
+    margin: 0;
+}
+
+.request-summary strong {
+    color: var(--ink);
+}
+
+.request-notice {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.request-notice .icon-button {
+    color: inherit;
+}
+
+.modal-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 9px;
+}
+
+.field-hint {
+    display: block;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.5;
+}
+
+/* Granular permission checkboxes (staff form, branch picker) */
+.modal .permission-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px;
+    margin-top: 7px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-alt);
+}
+
+.modal .checkbox-row,
+.modal .permission-grid label.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.modal .checkbox-row span {
+    display: grid;
+}
+
+.modal .checkbox-row .field-hint {
+    margin: 0;
+}
+
+.modal input[type='checkbox'] {
+    width: auto;
+    margin: 0;
+    padding: 0;
+}
+
+@media (max-width: 520px) {
+    .approvals-filters {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .approval-card>header {
+        flex-direction: column;
+    }
+
+    .modal .permission-grid {
+        grid-template-columns: 1fr;
+    }
+}

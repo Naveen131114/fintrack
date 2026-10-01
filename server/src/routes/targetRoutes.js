@@ -1,15 +1,15 @@
 import { Router } from 'express';
 import { createTarget, deleteTarget, getTargetByMonth, listTargets, updateTarget } from '../controllers/targetController.js';
-import { requireDataWrite } from '../middleware/businessAccess.js';
+import { requirePermission } from '../middleware/businessAccess.js';
 
 const router = Router();
 
-// Staff can view the owner's targets but only the owner (or a personal user
-// for their own) can modify them.
-router.get('/', listTargets);
-router.post('/', requireDataWrite, createTarget);
-router.get('/:month', getTargetByMonth);
-router.put('/:id', requireDataWrite, updateTarget);
-router.delete('/:id', requireDataWrite, deleteTarget);
+// Granular staff rights: staff read the owner's targets and may change them
+// when the owner ticked create/edit/delete (or approved a request for it).
+router.get('/', requirePermission('view', 'targets'), listTargets);
+router.post('/', requirePermission('create', 'targets'), createTarget);
+router.get('/:month', requirePermission('view', 'targets'), getTargetByMonth);
+router.put('/:id', requirePermission('edit', 'targets'), updateTarget);
+router.delete('/:id', requirePermission('delete', 'targets'), deleteTarget);
 
 export default router;
