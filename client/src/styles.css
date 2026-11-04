@@ -384,6 +384,42 @@ nav {
     font-size: 11px;
 }
 
+.date-range-filter {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.date-range-filter label {
+    display: grid;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.date-range-filter input {
+    min-width: 136px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 8px 9px;
+    font: inherit;
+}
+
+.date-range-filter input:focus {
+    border-color: var(--green);
+    outline: none;
+}
+
+.date-range-error {
+    flex-basis: 100%;
+    color: var(--coral);
+    font-size: 11px;
+}
+
 .updated {
     color: #a5afac;
     font-size: 11px;
@@ -1566,6 +1602,9 @@ nav {
     background: var(--surface);
     color: var(--ink);
     padding: 8px 10px;
+    font-size: 12px;
+}
+.txn-table-tools .date-range-filter input {
     font-size: 12px;
 }
 .txn-table-tools button:hover {
