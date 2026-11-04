@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Pencil, ShieldQuestion, Trash2 } from 'lucid
 import { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { getStoredUser, isBusinessUser } from '../utils/roles';
+import { isDateInRange, parseDateInput } from '../utils/dateRange';
 
 // Cached business PDF-template (logo + address from the business_owner).
 // Fetched once per page load for business users so owner + staff exports
@@ -35,42 +36,7 @@ function getBusinessBranding() {
     return brandingPromise;
 }
 
-const REPORT_MONTH_NAMES = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-];
-
-function formatDayMonthYear(date) {
-    return `${date.getDate()} ${REPORT_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
-}
-
-function formatMonthYear(date) {
-    return `${REPORT_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
-}
-
-function formatLast3MonthsLabel(now = new Date()) {
-    // Last 3 calendar months including current month: e.g. Sept 2026 -> July, August, September 2026
-    const months = [2, 1, 0].map((offset) => new Date(now.getFullYear(), now.getMonth() - offset, 1));
-    const years = new Set(months.map((d) => d.getFullYear()));
-    if (years.size === 1) {
-        return `${months.map((d) => REPORT_MONTH_NAMES[d.getMonth()]).join(', ')} ${months[0].getFullYear()}`;
-    }
-    // Year boundary (e.g. Nov 2025, Dec 2025, Jan 2026) -> keep year per month.
-    return months.map((d) => formatMonthYear(d)).join(', ');
-}
-
-function formatWeekLabel(now = new Date()) {
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
-    const end = new Date(start);
-    end.setDate(end.getDate() + 6);
-    if (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth()) {
-        return `${start.getDate()}-${end.getDate()} ${REPORT_MONTH_NAMES[start.getMonth()]} ${start.getFullYear()}`;
-    }
-    if (start.getFullYear() === end.getFullYear()) {
-        return `${start.getDate()} ${REPORT_MONTH_NAMES[start.getMonth()]} - ${end.getDate()} ${REPORT_MONTH_NAMES[end.getMonth()]} ${end.getFullYear()}`;
-    }
-    return `${formatDayMonthYear(start)} - ${formatDayMonthYear(end)}`;
-}
+const formatDayMonthYear = (date) => date.toLocaleDateString('en-IN');
 
 function normalizeTypeLabel(typeFilter) {
     const normalized = String(typeFilter || 'All').trim().toLowerCase();
@@ -78,31 +44,20 @@ function normalizeTypeLabel(typeFilter) {
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
-// Shared by all users/roles: single source for export heading + filename.
-// Examples:
-//  this-month + All     -> "September 2026 All Transactions Report"
-//  last-3-months + Income -> "July, August, September 2026 Income Report"
-export function getTransactionReportTitle(dateFilter = 'all', typeFilter = 'All', now = new Date()) {
+export function getTransactionReportTitle(dateStart = '', dateEnd = '', typeFilter = 'All') {
     const typeLabel = normalizeTypeLabel(typeFilter);
-    const isAllTypes = typeLabel === 'All Transactions';
-    switch (dateFilter) {
-        case 'today':
-            return `${formatDayMonthYear(now)} ${typeLabel} Report`;
-        case 'this-week':
-            return `${formatWeekLabel(now)} ${typeLabel} Report`;
-        case 'this-month':
-            return `${formatMonthYear(now)} ${typeLabel} Report`;
-        case 'last-month': {
-            const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-            return `${formatMonthYear(d)} ${typeLabel} Report`;
-        }
-        case 'last-3-months':
-            return `${formatLast3MonthsLabel(now)} ${typeLabel} Report`;
-        case 'all':
-        default:
-            if (isAllTypes) return 'All Transactions Report';
-            return `All Time ${typeLabel} Report`;
-    }
+    const start = parseDateInput(dateStart);
+    const end = parseDateInput(dateEnd);
+    const rangeLabel = start && end
+        ? start.getTime() === end.getTime()
+            ? formatDayMonthYear(start)
+            : `${formatDayMonthYear(start)} - ${formatDayMonthYear(end)}`
+        : start
+            ? `From ${formatDayMonthYear(start)}`
+            : end
+                ? `Through ${formatDayMonthYear(end)}`
+                : 'All Time';
+    return `${rangeLabel} ${typeLabel} Report`;
 }
 
 // Numbers (optionally signed, currency formatted or a percentage) are right
@@ -603,7 +558,7 @@ endstream`
 
     return pdf;
 }
-export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 8, dateFilter = 'all', typeFilter = 'All', onExportReady, showTotal = false, exportTitle = '', summary = null, permissions = null, onRequest = null }) {
+export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 8, dateStart = '', dateEnd = '', typeFilter = 'All', onExportReady, showTotal = false, exportTitle = '', summary = null, permissions = null, onRequest = null }) {
     const [page, setPage] = useState(1);
     // Read-only tables (no handlers) skip the Actions column entirely.
     // `permissions` (see utils/permissions) only ever REMOVES an action a page
@@ -618,21 +573,10 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
             || permissions?.canEdit !== false
             || permissions?.canDelete !== false
             || Boolean(onRequest));
-    useEffect(() => { setPage(1); }, [dateFilter, typeFilter, rows]);
+    useEffect(() => { setPage(1); }, [dateStart, dateEnd, typeFilter, rows]);
     const isTransactionsTable = columns.some((column) => column.key === 'category') && columns.some((column) => column.key === 'type');
     const filteredRows = isTransactionsTable ? rows.filter((row) => {
-        const today = new Date();
-        const year = today.getFullYear();
-        const month = today.getMonth();
-        let start = new Date(year, month, 1);
-        let end = new Date(year, month + 1, 1);
-        if (dateFilter === 'today') { start = new Date(year, month, today.getDate()); end = new Date(year, month, today.getDate() + 1); }
-        if (dateFilter === 'this-week') { start = new Date(year, month, today.getDate() - today.getDay()); end = new Date(start); end.setDate(end.getDate() + 7); }
-        if (dateFilter === 'last-month') { start = new Date(year, month - 1, 1); end = new Date(year, month, 1); }
-        // Last 3 calendar months including current month (Sep 2026 -> Jul, Aug, Sep).
-        if (dateFilter === 'last-3-months') start = new Date(year, month - 2, 1);
-        const date = new Date(row.date);
-        return (typeFilter === 'All' || row.type === typeFilter) && (dateFilter === 'all' || (date >= start && date < end));
+        return (typeFilter === 'All' || row.type === typeFilter) && isDateInRange(row.date, dateStart, dateEnd);
     }) : rows;
     const pages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
     const current = filteredRows.slice((page - 1) * pageSize, page * pageSize);
@@ -643,7 +587,7 @@ export default function DataTable({ columns, rows, onEdit, onDelete, pageSize = 
         return sum + (isExpense ? -value : value);
     }, 0) : 0;
     const exportRows = async (format) => {
-        const reportTitle = exportTitle || (isTransactionsTable ? getTransactionReportTitle(dateFilter, typeFilter) : 'Transactions Report');
+        const reportTitle = exportTitle || (isTransactionsTable ? getTransactionReportTitle(dateStart, dateEnd, typeFilter) : 'Transactions Report');
         const fileBase = reportTitle.replace(/[\\/:*?"<>|]/g, '').trim() || 'Transactions Report';
         const data = isTransactionsTable
             ? filteredRows.map((row) => [row.type, row.category, new Date(row.date).toLocaleDateString('en-IN'), row.description || row.title || '', Number(row.amount || 0).toFixed(2)])

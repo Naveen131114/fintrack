@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from './services/api';
 import DataTable from './components/DataTable';
+import DateRangeFilter from './components/DateRangeFilter';
 import ResourcePage from './components/ResourcePage';
 import StaffPage from './components/StaffPage';
 import AlertDialog from './components/AlertDialog';
 import { useChangeRequest } from './components/RequestApproval';
 import { getStoredUser, isBusinessStaff, isBusinessUser, useStoredUser } from './utils/roles';
 import { canCreate, canRequest, tablePermissions } from './utils/permissions';
+import { getDefaultDateRange } from './utils/dateRange';
 
 // TopNavbar stores the selected branch id in fintrack_selected_branch ('ALL' means no specific branch).
 const defaultBranchId = () => {
@@ -129,7 +131,8 @@ export function TransactionsPage() {
     const [form, setForm] = useState(emptyTransactionForm);
     const [message, setMessage] = useState('');
     const [deleteAlert, setDeleteAlert] = useState(null);
-    const [dateFilter, setDateFilter] = useState('this-month');
+    const [dateRange, setDateRange] = useState(getDefaultDateRange);
+    const { startDate, endDate } = dateRange;
     const [typeFilter, setTypeFilter] = useState('All');
         const business = isBusinessUser(getStoredUser());
     const [selectedBranchId, setSelectedBranchId] = useState(() => localStorage.getItem('fintrack_selected_branch') || 'ALL');
@@ -142,35 +145,6 @@ export function TransactionsPage() {
     const currentUser = useStoredUser();
     const changes = useChangeRequest('transactions');
     const mayCreateTransaction = canCreate(currentUser, 'transactions');
-
-    const dateOptions = [
-        ['today', 'Today'],
-        ['this-week', 'This week'],
-        ['this-month', 'This month'],
-        ['last-month', 'Last month'],
-        ['last-3-months', 'Last 3 months'],
-        ['all', 'All dates']
-    ];
-
-    const getDateRange = (filter) => {
-        const today = new Date();
-        const year = today.getFullYear();
-        const month = today.getMonth();
-        if (filter === 'today') return [new Date(year, month, today.getDate()), new Date(year, month, today.getDate() + 1)];
-        if (filter === 'this-week') { const start = new Date(year, month, today.getDate() - today.getDay()); const end = new Date(start); end.setDate(end.getDate() + 7); return [start, end]; }
-        if (filter === 'this-month') return [new Date(year, month, 1), new Date(year, month + 1, 1)];
-        if (filter === 'last-month') return [new Date(year, month - 1, 1), new Date(year, month, 1)];
-        if (filter === 'last-3-months') return [new Date(year, month - 2, 1), new Date(year, month + 1, 1)];
-        return [null, null];
-    };
-
-    const filteredRows = useMemo(() => {
-        const [start, end] = getDateRange(dateFilter);
-        return rows.filter((row) => {
-            const date = new Date(row.date);
-            return (typeFilter === 'All' || row.type === typeFilter) && (!start || (date >= start && date < end));
-        });
-    }, [rows, dateFilter, typeFilter]);
 
         const load = () => api.transactions.list(selectedBranchId).then(setRows);
     useEffect(() => { load(); }, [selectedBranchId]);
@@ -231,10 +205,10 @@ export function TransactionsPage() {
             <div>
                 <p className="eyebrow">Ledger</p>
                 <h1>Transactions</h1>
-                <p className="subheading">Every income and expense, in descending order.</p>
+                {/* <p className="subheading">Every income and expense, in descending order.</p> */}
             </div>
             <div className="txn-table-tools">
-                <select value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} aria-label="Filter by date"><option value="today">Today</option><option value="this-week">This week</option><option value="this-month">This month</option><option value="last-month">Last month</option><option value="last-3-months">Last 3 months</option><option value="all">All dates</option></select>
+                <DateRangeFilter startDate={startDate} endDate={endDate} onStartDateChange={(value) => setDateRange((range) => ({ ...range, startDate: value }))} onEndDateChange={(value) => setDateRange((range) => ({ ...range, endDate: value }))} />
                 <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} aria-label="Filter by type"><option>All</option><option>Income</option><option>Expense</option></select>
                 <span className="export-label">Export as</span>{['xl', 'word', 'pdf'].map((format) => <button type="button" key={format} onClick={() => exportFile(format)}>{format === 'xl' ? 'XL' : format[0].toUpperCase() + format.slice(1)}</button>)}
             </div>
@@ -244,7 +218,7 @@ export function TransactionsPage() {
         </div>
         {message && <div className="success-banner">{message}</div>}
         <section className="panel resource-panel">
-            <DataTable columns={columns} rows={rows} dateFilter={dateFilter} typeFilter={typeFilter} onExportReady={exportRef} showTotal onEdit={(row) => { setEditing(row); setForm({ ...emptyTransactionForm(), ...row, amount: String(row.amount ?? ''), date: new Date(row.date).toISOString().slice(0, 16) }); setOpen(true); }} onDelete={(row) => setDeleteAlert(row)} permissions={(row) => tablePermissions(currentUser, 'transactions', row?._id || row?.id || null)} onRequest={changes.requestChange} />
+            <DataTable columns={columns} rows={rows} dateStart={startDate} dateEnd={endDate} typeFilter={typeFilter} onExportReady={exportRef} showTotal onEdit={(row) => { setEditing(row); setForm({ ...emptyTransactionForm(), ...row, amount: String(row.amount ?? ''), date: new Date(row.date).toISOString().slice(0, 16) }); setOpen(true); }} onDelete={(row) => setDeleteAlert(row)} permissions={(row) => tablePermissions(currentUser, 'transactions', row?._id || row?.id || null)} onRequest={changes.requestChange} />
         </section>{open && <div className="modal-backdrop"><div className="modal modal-two-column"><div className="modal-heading"><div><p className="eyebrow">Ledger entry</p><h2>{editing ? 'Edit transaction' : 'Add transaction'}</h2></div><button className="icon-button" onClick={() => setOpen(false)}>×</button></div><form className="modal-form-two-column" onSubmit={save}><label>Type <span className="required-asterisk">*</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value, category: '' })} required><option value="">Select type</option>{(types.length ? types.map((item) => item.name) : ['Income', 'Expense', 'Others']).map((item) => <option key={item}>{item}</option>)}</select></label><label>Category <span className="required-asterisk">*</span><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} required><option value="">Select category</option>{categories.map((item) => <option key={item._id}>{item.name}</option>)}</select></label><label>Date and time <span className="required-asterisk">*</span><input type="datetime-local" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} required /></label><label>Amount <span className="required-asterisk">*</span><input type="number" min="0" step="0.01" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} required /></label><label className="full-width">Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Optional" /></label>{business && <><label className="full-width">Branch <span className="required-asterisk">*</span><select value={form.branchId} onChange={(event) => setForm({ ...form, branchId: event.target.value })} required><option value="">Select branch</option>{branches.filter((b) => b.status === 'active').map((b) => <option key={b._id} value={b._id}>{b.branchName}</option>)}</select></label><label>Payment type<select value={form.paymentType} onChange={(event) => setForm({ ...form, paymentType: event.target.value })}><option>Cash</option><option>Bank</option><option>UPI</option></select></label>{form.paymentType === 'Bank' && <label>Bank account <span className="required-asterisk">*</span><select value={form.bankAccountId} onChange={(event) => setForm({ ...form, bankAccountId: event.target.value })} required><option value="">Select bank account</option>{banks.filter((b) => b.status === 'active').map((b) => <option key={b._id} value={b._id}>{b.bankName} ({b.ifscCode})</option>)}</select></label>}{form.paymentType === 'UPI' && <><label>UPI account <span className="required-asterisk">*</span><select value={form.upiAccountId} onChange={(event) => setForm({ ...form, upiAccountId: event.target.value })} required><option value="">Select UPI account</option>{upis.filter((u) => u.status === 'active').map((u) => <option key={u._id} value={u._id}>{u.upiId}</option>)}</select></label><label>Transaction number <span className="required-asterisk">*</span><input value={form.transactionNumber} onChange={(event) => setForm({ ...form, transactionNumber: event.target.value })} required /></label></>}</>}<button className="primary-button modal-submit full-width">Save transaction</button></form></div></div>}{deleteAlert && <AlertDialog open={true} title="Delete transaction?" message="This action cannot be undone." confirmText="Delete" cancelText="Cancel" variant="destructive" onConfirm={() => remove(deleteAlert)} onCancel={() => setDeleteAlert(null)} />}{changes.notice}{changes.modal}</div>;
 }
 
